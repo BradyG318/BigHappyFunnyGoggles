@@ -1,2 +1,2 @@
 # BigScaryStalkerGlasses
-tbh, we may need a slightly more marketable name
+tbh, we may need a slightly more marketable name - changed it!
