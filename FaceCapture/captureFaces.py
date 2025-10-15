@@ -24,7 +24,7 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
 # For webcam input:
-cap = cv2.VideoCapture(3) # change number to use different cameras
+cap = cv2.VideoCapture(0) # change number to use different cameras
 
 # Use LONG RANGE face detection model
 with mp_face_detection.FaceDetection(
@@ -35,7 +35,7 @@ with mp_face_detection.FaceDetection(
   # Use MediaPipe Face Detection
   with mp_face_mesh.FaceMesh(
     static_image_mode=False,
-    max_num_faces=3,
+    max_num_faces=5,
     refine_landmarks=False,
     min_detection_confidence=0.2,
     min_tracking_confidence=0.1) as face_mesh:
@@ -86,8 +86,12 @@ with mp_face_detection.FaceDetection(
               image.flags.writeable = True
               cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
 
-      # Create a window to display the image
+      # Create a named window to display the image in fullscreen mode
+      cv2.namedWindow('MediaPipe Hybrid Face Detection - Long Range', cv2.WND_PROP_FULLSCREEN)
+      cv2.setWindowProperty('MediaPipe Hybrid Face Detection - Long Range', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+      
       # To flip the image horizontally for a selfie-view display, replace image --> cv2.flip(image, 1)
+      # Display the image with detected faces in the named window
       cv2.imshow('MediaPipe Hybrid Face Detection - Long Range', image)
       
       # Break the loop on 'ESC' key press
