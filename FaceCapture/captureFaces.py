@@ -3,20 +3,20 @@ import mediapipe as mp
 
 # Function to preprocess the frame for better face detection
 def preprocess_frame(image):
-    # Reduce compression artifacts
-    image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+  # Reduce compression artifacts
+  image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
     
-    # Enhance contrast aggressively for longer range (helps with detection)
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
-    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+  # Enhance contrast aggressively for longer range (helps with detection)
+  lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+  lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
+  image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     
-    # Scale image up for better detection of smaller faces
-    scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
-    height, width = image.shape[:2]
-    image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+  # Scale image up for better detection of smaller faces
+  scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+  height, width = image.shape[:2]
+  image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
 
-    return image
+  return image
 
 # Initialize MediaPipe variables
 mp_face_detection = mp.solutions.face_detection
@@ -28,8 +28,8 @@ cap = cv2.VideoCapture(0) # change number to use different cameras
 
 # Use LONG RANGE face detection model
 with mp_face_detection.FaceDetection(
-    model_selection=1,  # 1 = Long range model
-    min_detection_confidence=0.1
+  model_selection=1,  # 1 = Long range model
+  min_detection_confidence=0.1
 ) as face_detection:
 
   # Use MediaPipe Face Detection
