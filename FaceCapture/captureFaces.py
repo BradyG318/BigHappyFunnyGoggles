@@ -4,7 +4,7 @@ import mediapipe as mp
 # Function to preprocess the frame for better face detection
 def preprocess_frame(image):
   # Reduce compression artifacts
-  image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+  image = cv2.medianBlur(image, 1)  # Reduce noise aggressively for longer range
     
   # Enhance contrast aggressively for longer range (helps with detection)
   lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -12,7 +12,7 @@ def preprocess_frame(image):
   image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     
   # Scale image up for better detection of smaller faces
-  scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+  scale_factor = 3  # Increase this if needed (1.5 = 150% size)
   height, width = image.shape[:2]
   image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
 
@@ -24,7 +24,7 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
 # For webcam input:
-cap = cv2.VideoCapture(0) # change number to use different cameras
+cap = cv2.VideoCapture(3) # change number to use different cameras
 
 # Use LONG RANGE face detection model
 with mp_face_detection.FaceDetection(
@@ -67,7 +67,7 @@ with mp_face_detection.FaceDetection(
           box_h = int(bbox.height * h)
 
           # Expand ROI slightly for better mesh detection
-          expansion = 0.15  # 15% expansion
+          expansion = 0.25  # 25% expansion
           x_min = max(0, int(x_min - box_w * expansion))
           y_min = max(0, int(y_min - box_h * expansion))
           x_max = min(w, int(x_min + box_w * (1 + 2 * expansion)))
