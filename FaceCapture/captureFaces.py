@@ -23,8 +23,8 @@ mp_face_detection = mp.solutions.face_detection
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
-# For webcam input:
-cap = cv2.VideoCapture(3) # change number to use different cameras
+# For camera input:
+cap = cv2.VideoCapture(0) # change number to use different cameras
 
 # Use LONG RANGE face detection model
 with mp_face_detection.FaceDetection(
@@ -38,7 +38,7 @@ with mp_face_detection.FaceDetection(
     max_num_faces=5,
     refine_landmarks=False,
     min_detection_confidence=0.2,
-    min_tracking_confidence=0.1) as face_mesh:
+    min_tracking_confidence=0.01) as face_mesh:
 
     while cap.isOpened(): # While the camera is running
       success, image = cap.read() # If camera running is succesful, read the image
