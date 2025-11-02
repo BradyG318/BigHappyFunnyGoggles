@@ -1,6 +1,7 @@
 # simple_stream.py
 import cv2
 from flask import Flask, Response
+from pyngrok import ngrok
 
 # initialize Flask app reference
 app = Flask(__name__)
@@ -34,13 +35,15 @@ def index():
     <body>
         <h1>Face Detection Live Stream</h1>
         <img src="/video_feed" width="640" height="480">
-        <p>Stream is active! View the video feed above.</p>
     </body>
     </html>
     """
 
 # Run the Flask app
 if __name__ == '__main__':
-    print("""Connect at: http://10.115.106.201:5000 for website
-    or http://10.115.106.201:5000/video_feed for direct feed""")
-    app.run(host='10.115.106.201', port=5000) # change host IP address as needed
+    # Start ngrok tunnel
+    public_url = ngrok.connect(5000)
+    print(f"🚀 Ngrok URL: {public_url}")
+    print(f"🏠 Local URL: http://localhost:5000")
+    
+    app.run(host='0.0.0.0', port=5000)
