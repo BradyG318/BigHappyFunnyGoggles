@@ -1,13 +1,13 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 import asyncpg
 import os
 import uvicorn
 from dotenv import load_dotenv
 
-app = FastAPI(title="Items API", version="1.0.0")
+app = FastAPI(title="Demo DB API", version="1.0.0")
 
 load_dotenv()
 
@@ -40,6 +40,7 @@ class ItemResponse(BaseModel):
     face: List[float]
 
 class ItemCreate(BaseModel):
+    id: int
     face: List[float]
 
 class HealthResponse(BaseModel):
@@ -87,6 +88,18 @@ async def get_all_items(conn=Depends(get_db_connection)):
             detail=f"Failed to fetch items: {str(e)}"
         )
 
+# Get total item count
+@app.get("/items/count")
+async def get_item_count(conn=Depends(get_db_connection)):
+    try:
+        count = await conn.fetchval("SELECT COUNT(*) FROM items")
+        return {"count": str(count)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get count: {str(e)}"
+        )
+
 # Get item by ID
 @app.get("/items/{item_id}", response_model=ItemResponse)
 async def get_item(item_id: int, conn=Depends(get_db_connection)):
@@ -125,10 +138,10 @@ async def create_item(item: ItemCreate, conn=Depends(get_db_connection)):
         vector_str = f"[{','.join(map(str, item.face))}]"
         
         result = await conn.fetchrow(
-            """INSERT INTO items (face) 
-               VALUES ($1) 
+            """INSERT INTO items (id, face) 
+               VALUES ($1, $2) 
                RETURNING *""",
-            vector_str
+            item.id, vector_str
         )
         
         # Parse the returned vector
@@ -143,18 +156,6 @@ async def create_item(item: ItemCreate, conn=Depends(get_db_connection)):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create item: {str(e)}"
-        )
-
-# Get total item count
-@app.get("/items/count")
-async def get_item_count(conn=Depends(get_db_connection)):
-    try:
-        count = await conn.fetchval("SELECT COUNT(*) FROM items")
-        return {"count": count}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get count: {str(e)}"
         )
 
 if __name__ == "__main__":
