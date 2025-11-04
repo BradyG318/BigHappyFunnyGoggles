@@ -1,7 +1,7 @@
 # simple_stream.py
 import cv2
 from flask import Flask, Response
-from pyngrok import ngrok
+#from pyngrok import ngrok
 
 # initialize Flask app reference
 app = Flask(__name__)
@@ -42,11 +42,11 @@ def index():
 # Run the Flask app
 if __name__ == '__main__':
     # Start ngrok tunnel
-    public_url = ngrok.connect(5000)
+    # public_url = ngrok.connect(5000)
 
     print("Starting MJPEG Stream")
     print("=" * 50)
-    print(f"Ngrok URL: {public_url}")
+    #print(f"Ngrok URL: {public_url}")
     print(f"Local URL: http://localhost:5000")
     print("=" * 50)
     
