@@ -8,7 +8,6 @@ import warnings
 warnings.filterwarnings("ignore", message=".*GetPrototype.*")
 
 import mediapipe as mp
-from sklearn.neighbors import KDTree
 
 # --- CONFIGURATION (LOCAL FILE SAVING) ---
 
@@ -22,7 +21,7 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.99
+RECOGNITION_THRESHOLD = 0.63
 TARGET_FACE_ID = None # Set to None to save all unique faces
 
 # Pose filtering parameters
@@ -30,8 +29,8 @@ MAX_POSE_ANGLE = 25  # Maximum acceptable head turn angle
 POSE_FILTERING = True  # Enable/disable pose-based filtering
 
 # Sampling parameters for robust data collection
-MIN_SAMPLES_FOR_AVERAGE = 30     # Minimum frames needed before we calculate the final vector
-NUM_BEST_FRAMES_TO_SEND = 5      # Number of sharpest frames to save locally
+MIN_SAMPLES_FOR_AVERAGE = 50     # Minimum frames needed before we calculate the final vector
+NUM_BEST_FRAMES_TO_SEND = 10      # Number of sharpest frames to save locally
 MIN_SHARPNESS_THRESHOLD = 15.0   # Minimum image quality score to consider a frame
 
 # --- DATA STRUCTURES ---
@@ -115,7 +114,7 @@ def get_face_embedding(landmarks):
         x_axis = right_eye - left_eye
         x_axis = x_axis / np.linalg.norm(x_axis)
         
-        # Temporary Y-axis: from nose to forehead (upward)
+        # Temporary Y-axis: from nose to forehead (upward) DEV: maybe chin if needed
         temp_y = forehead - nose_tip
         temp_y = temp_y / np.linalg.norm(temp_y)
         
@@ -131,7 +130,7 @@ def get_face_embedding(landmarks):
         rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
         
         # Ensure it's a proper rotation matrix (orthogonal)
-        if np.linalg.det(rotation_matrix) < 0:
+        if np.linalg.det(rotation_matrix) < -1e-6:
             # Fix handedness if needed
             z_axis = -z_axis
             rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
@@ -147,25 +146,56 @@ def get_face_embedding(landmarks):
     # 5. ADD ROBUST FEATURE SELECTION
     feature_vector = []
     
-    # Use key facial regions that are most stable
-    key_regions = {
-        'eyes': [33, 133, 157, 158, 159, 160, 161, 246, 7, 163, 144, 145, 153, 154, 155],
-        'nose': [1, 2, 3, 4, 5, 6, 168, 197, 195, 196],
-        'mouth': [61, 84, 85, 86, 87, 88, 89, 90, 91, 95, 96, 78, 191, 80, 81, 82],
-        'jawline': [136, 150, 149, 148, 152, 377, 378, 365, 397, 288, 361, 323],
-        'eyebrows': [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]
+    # Relative distances between key points (scale-invariant)
+    key_distances = {
+        (33, 263),   # Eye corners width
+        (1, 152),    # Nose to chin
+        (10, 152),   # Forehead to chin  
+        (33, 1),     # Right eye to nose
+        (263, 1),    # Left eye to nose
+        (61, 291),   # Mouth corners
+        (159, 386),  # Eye heights
     }
     
-    for region_name, indices in key_regions.items(): # Region name currently unused but could be in future
+    for idx1, idx2 in key_distances:
+        if idx1 < len(rotated_points) and idx2 < len(rotated_points):
+            dist = np.linalg.norm(rotated_points[idx1] - rotated_points[idx2])
+            feature_vector.append(dist)
+    
+    # Add ratios for better scale invariance
+    eye_width = np.linalg.norm(rotated_points[33] - rotated_points[263])
+    face_height = np.linalg.norm(rotated_points[10] - rotated_points[152])
+    if face_height > 0:
+        feature_vector.append(eye_width / face_height)
+    
+    # C. Add region-specific features with different weighting
+    high_weight_regions = {
+        'eyes': [33, 133, 157, 158, 159, 160, 161, 246, 7, 163],  # Most stable features
+        'nose_bridge': [1, 2, 3, 4, 5, 6],  # Nose shape is very distinctive
+    }
+
+    medium_weight_regions = {
+        'mouth': [61, 84, 85, 78, 191, 80, 81, 82],
+        'eyebrows': [70, 63, 105, 66, 107]
+    }
+
+    # Add high-weight regions (repeat to give more importance)
+    for region_name, indices in high_weight_regions.items():
+        for idx in indices:
+            if idx < len(rotated_points):
+                feature_vector.extend(rotated_points[idx] * 2.0)  # Double weight
+
+    # Add medium-weight regions
+    for region_name, indices in medium_weight_regions.items():
         for idx in indices:
             if idx < len(rotated_points):
                 feature_vector.extend(rotated_points[idx])
-    
-    # Add overall face shape descriptors
-    face_contour = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136]
+
+    # D. Add facial contour but with lower weight
+    face_contour = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365]
     for idx in face_contour:
         if idx < len(rotated_points):
-            feature_vector.extend(rotated_points[idx])
+            feature_vector.extend(rotated_points[idx] * 0.5)  # Half weight
     
     return np.array(feature_vector)
 
@@ -242,21 +272,66 @@ def rotationMatrixToEulerAngles(R):
 
     return np.array([x, y, z]) * 180 / np.pi  # Convert to degrees
 
+def cosine_similarity(vec1, vec2):
+    """Calculate cosine similarity between two vectors"""
+    dot_product = np.dot(vec1, vec2)
+    norm1 = np.linalg.norm(vec1)
+    norm2 = np.linalg.norm(vec2)
+    if norm1 == 0 or norm2 == 0:
+        return 0
+    return dot_product / (norm1 * norm2)
+
+def recognize_face(face_encoding, known_encodings, known_ids, threshold=0.85):
+    """Enhanced recognition using cosine similarity"""
+    if not known_encodings:
+        return None
+    
+    best_similarity = -1
+    best_match_id = None
+    
+    for face_id, known_encoding in zip(known_ids, known_encodings):
+        similarity = cosine_similarity(face_encoding, known_encoding)
+        
+        if similarity > best_similarity and similarity > threshold:
+            best_similarity = similarity
+            best_match_id = face_id
+    
+    return best_match_id
+
 # --- ENHANCED SAMPLING STRATEGY ---
 
-def is_good_pose_for_training(pose_angles):
-    """
-    Filter samples based on head pose to ensure diverse training data
-    """
+def get_pose_quality_score(pose_angles):
+    """Calculate a quality score based on head pose (0-1 scale)"""
     if pose_angles is None:
-        return False
+        return 0.0
     
     pitch, yaw, roll = pose_angles
     
-    # Accept frontal and moderately angled faces
-    return (abs(pitch) < 20 and   # Limited up/down tilt
-            abs(yaw) < 30 and     # Limited left/right turn  
-            abs(roll) < 15)       # Limited head tilt
+    # Ideal pose is frontal (all angles near 0)
+    pitch_score = max(0, 1 - abs(pitch) / 30)  # 30 degrees max
+    yaw_score = max(0, 1 - abs(yaw) / 40)      # 40 degrees max  
+    roll_score = max(0, 1 - abs(roll) / 20)    # 20 degrees max
+    
+    # Combined quality score (weighted average)
+    quality = 0.4 * yaw_score + 0.3 * pitch_score + 0.3 * roll_score
+    return quality
+
+def calculate_weighted_average(samples):
+    """Calculate weighted average based on sharpness and pose quality"""
+    if not samples:
+        return None
+    
+    vectors = np.array([s['vector'] for s in samples])
+    weights = np.array([s['sharpness'] * s.get('pose_quality', 1.0) for s in samples])
+    
+    # Normalize weights
+    if np.sum(weights) > 0:
+        weights = weights / np.sum(weights)
+        weighted_avg = np.average(vectors, axis=0, weights=weights)
+    else:
+        weighted_avg = np.mean(vectors, axis=0)
+    
+    return weighted_avg
 
 def save_data_locally(face_id, samples):
     """
@@ -266,8 +341,7 @@ def save_data_locally(face_id, samples):
     print(f"\n--- LOCAL SAVE START: Face ID #{face_id} ---")
     
     # 1. Calculate the final, averaged face vector
-    all_vectors = np.array([s['vector'] for s in samples])
-    final_vector = np.mean(all_vectors, axis=0)
+    final_vector = calculate_weighted_average(samples)  # Uses sharpness + pose quality
     
     # 2. Update and save the vectors JSON file
     
@@ -346,13 +420,8 @@ with mp_face_mesh.FaceMesh(
                 
                 # 1. Recognize/Identify the face
                 if known_face_encodings:
-                    # Use KDTree for efficient nearest neighbor search
-                    kdtree = KDTree(np.array(known_face_encodings))
-                    dist, ind = kdtree.query([face_encoding], k=1)
-                    best_match_index = ind[0][0]
-                    
-                    if dist[0][0] < RECOGNITION_THRESHOLD:
-                        face_id = known_face_ids[best_match_index]
+                    # Use cosine similarity function for recognition
+                    face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, threshold=0.85)  # Adjust this threshold as needed
                 
                 # 2. Handle New Face (First time seeing this person)
                 if face_id is None:
@@ -418,12 +487,16 @@ with mp_face_mesh.FaceMesh(
                 
                 if samples_collected < MIN_SAMPLES_FOR_AVERAGE:
                     
+                    pose_angles, _, _ = estimate_head_pose(face_landmarks, (h, w))
+                    pose_quality = get_pose_quality_score(pose_angles)
+
                     # Check sharpness threshold before adding sample
                     if data['sharpness'] >= MIN_SHARPNESS_THRESHOLD:
                         tracker['samples'].append({
                             'vector': data['encoding'],
                             'crop': data['crop'],
-                            'sharpness': data['sharpness']
+                            'sharpness': data['sharpness'],
+                            'pose_quality' : pose_quality
                         })
                         color = (0, 255, 0) # Green: Collecting
                         status = f"COLLECTING ({samples_collected + 1}/{MIN_SAMPLES_FOR_AVERAGE})"
