@@ -2,7 +2,13 @@ import os
 import cv2
 import numpy as np
 import json
+import warnings
+
+# deals with deprecation warnings from mediapipe
+warnings.filterwarnings("ignore", message=".*GetPrototype.*")
+
 import mediapipe as mp
+from sklearn.neighbors import KDTree
 
 # --- CONFIGURATION (LOCAL FILE SAVING) ---
 
@@ -16,13 +22,17 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.48
+RECOGNITION_THRESHOLD = 0.99
 TARGET_FACE_ID = None # Set to None to save all unique faces
+
+# Pose filtering parameters
+MAX_POSE_ANGLE = 25  # Maximum acceptable head turn angle
+POSE_FILTERING = True  # Enable/disable pose-based filtering
 
 # Sampling parameters for robust data collection
 MIN_SAMPLES_FOR_AVERAGE = 30     # Minimum frames needed before we calculate the final vector
 NUM_BEST_FRAMES_TO_SEND = 5      # Number of sharpest frames to save locally
-MIN_SHARPNESS_THRESHOLD = 20.0   # Minimum image quality score to consider a frame
+MIN_SHARPNESS_THRESHOLD = 15.0   # Minimum image quality score to consider a frame
 
 # --- DATA STRUCTURES ---
 
@@ -68,55 +78,185 @@ def get_sharpness_score(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
-# --- ⬇️ UPDATED 3D EMBEDDING FUNCTION ⬇️ ---
+# --- 3D EMBEDDING FUNCTION ---
 
 def get_face_embedding(landmarks):
     """
-    Creates a rotation- and translation-normalized 3D feature vector 
+    Creates a fully pose-normalized 3D feature vector 
+    that handles roll, pitch, and yaw rotations.
     from the 468 facial landmarks for robust recognition.
     """
-    all_x = [lm.x for lm in landmarks.landmark]
-    all_y = [lm.y for lm in landmarks.landmark]
-    all_z = [lm.z for lm in landmarks.landmark] # GET Z
+    # Extract all 3D coordinates
+    points_3d = np.array([(lm.x, lm.y, lm.z) for lm in landmarks.landmark])
     
-    centroid_x = np.mean(all_x)
-    centroid_y = np.mean(all_y)
-    centroid_z = np.mean(all_z) # GET Z CENTROID
+    # 1. CENTER THE FACE
+    centroid = np.mean(points_3d, axis=0)
+    centered_points = points_3d - centroid
     
-    normalized_landmarks = []
-    for lm in landmarks.landmark:
-        # NORMALIZE X, Y, AND Z
-        normalized_landmarks.append((
-            lm.x - centroid_x, 
-            lm.y - centroid_y, 
-            lm.z - centroid_z
-        ))
-
-    # --- Rotation is still based on 2D eye position (for roll) ---
-    p1_2d = (normalized_landmarks[33][0], normalized_landmarks[33][1]) # (x, y)
-    p2_2d = (normalized_landmarks[263][0], normalized_landmarks[263][1]) # (x, y)
+    # Define reference points for coordinate system
+    # Nose tip - origin
+    nose_tip = centered_points[1]  # Landmark 1 is nose tip
     
-    delta_x = p2_2d[0] - p1_2d[0]
-    delta_y = p2_2d[1] - p1_2d[1]
+    # Right eye corner - X-axis direction
+    right_eye = centered_points[33]  # Right eye outer corner
     
-    angle = np.arctan2(delta_y, delta_x)
+    # Left eye corner - for calculating X-axis
+    left_eye = centered_points[263]  # Left eye outer corner
     
-    cos_theta = np.cos(-angle)
-    sin_theta = np.sin(-angle)
+    # Chin - Y-axis direction (downward)
+    chin = centered_points[152]  # Chin bottom
     
-    flat_vector = []
-    # We rotate the x/y plane, but keep the normalized z
-    for x, y, z in normalized_landmarks: 
-        rotated_x = x * cos_theta - y * sin_theta
-        rotated_y = x * sin_theta + y * cos_theta
+    # Forehead - for better Y-axis estimation
+    forehead = centered_points[10]  # Forehead
+    
+    # 3. CREATE ROBUST COORDINATE SYSTEM
+    try:
+        # X-axis: horizontal direction between eyes
+        x_axis = right_eye - left_eye
+        x_axis = x_axis / np.linalg.norm(x_axis)
         
-        # Add all three coordinates to the final vector
-        flat_vector.extend([rotated_x, rotated_y, z]) 
+        # Temporary Y-axis: from nose to forehead (upward)
+        temp_y = forehead - nose_tip
+        temp_y = temp_y / np.linalg.norm(temp_y)
         
-    return np.array(flat_vector)
+        # Z-axis: cross product of X and temporary Y
+        z_axis = np.cross(x_axis, temp_y)
+        z_axis = z_axis / np.linalg.norm(z_axis)
+        
+        # Recalculate Y-axis from cross product of Z and X
+        y_axis = np.cross(z_axis, x_axis)
+        y_axis = y_axis / np.linalg.norm(y_axis)
+        
+        # Create rotation matrix
+        rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
+        
+        # Ensure it's a proper rotation matrix (orthogonal)
+        if np.linalg.det(rotation_matrix) < 0:
+            # Fix handedness if needed
+            z_axis = -z_axis
+            rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
+            
+    except (ValueError, np.linalg.LinAlgError):
+        # Fallback: use simple eye-based rotation (your original method)
+        print("Warning: Using fallback rotation")
+        # return get_face_embedding_fallback(landmarks)
+    
+    # 4. ROTATE ALL POINTS TO CANONICAL POSE
+    rotated_points = centered_points @ rotation_matrix.T  # Matrix multiplication
+    
+    # 5. ADD ROBUST FEATURE SELECTION
+    feature_vector = []
+    
+    # Use key facial regions that are most stable
+    key_regions = {
+        'eyes': [33, 133, 157, 158, 159, 160, 161, 246, 7, 163, 144, 145, 153, 154, 155],
+        'nose': [1, 2, 3, 4, 5, 6, 168, 197, 195, 196],
+        'mouth': [61, 84, 85, 86, 87, 88, 89, 90, 91, 95, 96, 78, 191, 80, 81, 82],
+        'jawline': [136, 150, 149, 148, 152, 377, 378, 365, 397, 288, 361, 323],
+        'eyebrows': [70, 63, 105, 66, 107, 55, 65, 52, 53, 46]
+    }
+    
+    for region_name, indices in key_regions.items(): # Region name currently unused but could be in future
+        for idx in indices:
+            if idx < len(rotated_points):
+                feature_vector.extend(rotated_points[idx])
+    
+    # Add overall face shape descriptors
+    face_contour = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136]
+    for idx in face_contour:
+        if idx < len(rotated_points):
+            feature_vector.extend(rotated_points[idx])
+    
+    return np.array(feature_vector)
 
-# --- ⬆️ END OF UPDATED FUNCTION ⬆️ ---
+    # --- POSE ESTIMATION FOR VISUALIZATION ---
 
+def estimate_head_pose(landmarks, image_size):
+    """
+    Estimate head pose angles for visualization and filtering
+    """
+    # 3D model points for basic head pose estimation
+    model_points = np.array([
+        (0.0, 0.0, 0.0),          # Nose tip
+        (0.0, -330.0, -65.0),     # Chin
+        (-225.0, 170.0, -135.0),  # Left eye left corner
+        (225.0, 170.0, -135.0),   # Right eye right corner
+        (-150.0, -150.0, -125.0), # Left mouth corner
+        (150.0, -150.0, -125.0)   # Right mouth corner
+    ])
+    
+    # Corresponding 2D image points
+    image_points = np.array([
+        [landmarks.landmark[1].x * image_size[1], landmarks.landmark[1].y * image_size[0]],  # Nose tip
+        [landmarks.landmark[152].x * image_size[1], landmarks.landmark[152].y * image_size[0]],  # Chin
+        [landmarks.landmark[33].x * image_size[1], landmarks.landmark[33].y * image_size[0]],  # Left eye
+        [landmarks.landmark[263].x * image_size[1], landmarks.landmark[263].y * image_size[0]],  # Right eye
+        [landmarks.landmark[61].x * image_size[1], landmarks.landmark[61].y * image_size[0]],  # Left mouth
+        [landmarks.landmark[291].x * image_size[1], landmarks.landmark[291].y * image_size[0]]   # Right mouth
+    ], dtype=np.float64)
+    
+    # Camera internals (approximate)
+    focal_length = image_size[1]
+    center = (image_size[1]/2, image_size[0]/2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype=np.float64)
+    
+    dist_coeffs = np.zeros((4, 1))  # Assuming no lens distortion
+    
+    try:
+        # Solve PnP
+        success, rotation_vector, translation_vector = cv2.solvePnP(
+            model_points, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE
+        )
+        
+        if success:
+            # Convert rotation vector to rotation matrix
+            rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
+            
+            # Calculate Euler angles
+            pose_angles = rotationMatrixToEulerAngles(rotation_matrix)
+            
+            return pose_angles, rotation_vector, translation_vector
+    except:
+        pass
+    
+    return None, None, None
+
+def rotationMatrixToEulerAngles(R):
+    """Convert rotation matrix to Euler angles (pitch, yaw, roll)"""
+    sy = np.sqrt(R[0,0] * R[0,0] + R[1,0] * R[1,0])
+    
+    singular = sy < 1e-6
+
+    if not singular:
+        x = np.arctan2(R[2,1], R[2,2])
+        y = np.arctan2(-R[2,0], sy)
+        z = np.arctan2(R[1,0], R[0,0])
+    else:
+        x = np.arctan2(-R[1,2], R[1,1])
+        y = np.arctan2(-R[2,0], sy)
+        z = 0
+
+    return np.array([x, y, z]) * 180 / np.pi  # Convert to degrees
+
+# --- ENHANCED SAMPLING STRATEGY ---
+
+def is_good_pose_for_training(pose_angles):
+    """
+    Filter samples based on head pose to ensure diverse training data
+    """
+    if pose_angles is None:
+        return False
+    
+    pitch, yaw, roll = pose_angles
+    
+    # Accept frontal and moderately angled faces
+    return (abs(pitch) < 20 and   # Limited up/down tilt
+            abs(yaw) < 30 and     # Limited left/right turn  
+            abs(roll) < 15)       # Limited head tilt
 
 def save_data_locally(face_id, samples):
     """
@@ -179,7 +319,7 @@ cap = cv2.VideoCapture(0)
 with mp_face_mesh.FaceMesh(
     max_num_faces=5,
     refine_landmarks=True,
-    min_detection_confidence=0.3,
+    min_detection_confidence=0.35,
     min_tracking_confidence=0.01) as face_mesh:
 
     while cap.isOpened():
@@ -206,13 +346,12 @@ with mp_face_mesh.FaceMesh(
                 
                 # 1. Recognize/Identify the face
                 if known_face_encodings:
-                    # Compare the new 3D vector to the known 3D vectors
-                    distances = [np.linalg.norm(known_enc - face_encoding) 
-                                 for known_enc in known_face_encodings]
+                    # Use KDTree for efficient nearest neighbor search
+                    kdtree = KDTree(np.array(known_face_encodings))
+                    dist, ind = kdtree.query([face_encoding], k=1)
+                    best_match_index = ind[0][0]
                     
-                    best_match_index = np.argmin(distances)
-                    
-                    if distances[best_match_index] < RECOGNITION_THRESHOLD:
+                    if dist[0][0] < RECOGNITION_THRESHOLD:
                         face_id = known_face_ids[best_match_index]
                 
                 # 2. Handle New Face (First time seeing this person)
