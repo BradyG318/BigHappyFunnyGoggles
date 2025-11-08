@@ -140,7 +140,7 @@ def get_pose_normalized_embedding(landmarks):
     for region_name, indices in high_weight_regions.items():
         for idx in indices:
             if idx < len(rotated_points):
-                feature_vector.extend(rotated_points[idx] * 2.5)  # Higher weight
+                feature_vector.extend(rotated_points[idx] * 1.15)  # Higher weight
 
     # Add medium-weight regions
     for region_name, indices in medium_weight_regions.items():
@@ -152,7 +152,7 @@ def get_pose_normalized_embedding(landmarks):
     face_contour = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365]
     for idx in face_contour:
         if idx < len(rotated_points):
-            feature_vector.extend(rotated_points[idx] * 0.25)  # Lower weight
+            feature_vector.extend(rotated_points[idx] * 0.15)  # Lower weight
     
     return np.array(feature_vector)
 
@@ -265,13 +265,13 @@ def save_data_locally(face_id, samples):
 
 # --- MAIN EXECUTION ---
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 # Initialize Face Mesh model
 with mp_face_mesh.FaceMesh(
     max_num_faces=5,
     refine_landmarks=True,
-    min_detection_confidence=0.4,
+    min_detection_confidence=0.5,
     min_tracking_confidence=0.01) as face_mesh:
 
     print("Starting face capture. Press 'Esc' to exit.")
@@ -304,11 +304,9 @@ with mp_face_mesh.FaceMesh(
                 top = int(min(y_coords)); bottom = int(max(y_coords))
                 left = int(min(x_coords)); right = int(max(x_coords))
                 
-                # Skip small detections - TUNING?
+                # Skip small detections
                 face_width = right - left
                 face_height = bottom - top
-                if face_width < 80 or face_height < 80:
-                    continue
                 
                 # Add buffer
                 buffer_x = int(face_width * 0.15)
