@@ -25,14 +25,14 @@ os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
 # Set to 0.90 for optimal separation based on your testing.
-RECOGNITION_THRESHOLD = 0.90  
+RECOGNITION_THRESHOLD = 0.85  
 TARGET_FACE_ID = None 
 
 # Sampling parameters for data collection
-MIN_SAMPLES_FOR_AVERAGE = 25    
+MIN_SAMPLES_FOR_AVERAGE = 50    
 NUM_BEST_FRAMES_TO_SEND = 10 
-MIN_SHARPNESS_KNOWN = 15.0  # Lower sharpness allowed for known faces
-MIN_SHARPNESS_UNKNOWN = 25.0 # Higher sharpness required for new (unknown) faces
+MIN_SHARPNESS_KNOWN = 10.0  # Lower sharpness allowed for known faces
+MIN_SHARPNESS_UNKNOWN = 20.0 # Higher sharpness required for new (unknown) faces
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
@@ -219,7 +219,7 @@ except Exception as e:
     print(f"FATAL ERROR: Could not initialize DeepFace model '{DEEPFACE_MODEL}'. Check installation and dependencies. Error: {e}")
     exit()
 
-
+# Initialize video capture
 cap = cv2.VideoCapture(0)
 
 # Initialize Face Mesh model
@@ -324,21 +324,24 @@ with mp_face_mesh.FaceMesh(
 
 
                 if face_id == -1: # Skip blurry faces
+                    # Blurry face - set placeholder values
+                    data['id'] = -1
+                    data['tracker'] = None
+                    data['color'] = (0, 100, 255)  # Dark Orange
+                    data['status'] = f"BLURRY START ({sharpness:.1f}/{MIN_SHARPNESS_UNKNOWN:.1f})"
                     current_frame_data.append(data)
-                    continue 
-
-                if face_id not in currently_tracked_faces:
-                    currently_tracked_faces.add(face_id)
-                else:
                     continue
                 
-                # If face_id is not -1, assign the tracker
-                if face_id != -1:
-                    data['id'] = face_id
-                    data['tracker'] = face_trackers[face_id]
-                
-                current_frame_data.append(data)
+                if face_id not in currently_tracked_faces:
+                    currently_tracked_faces.add(face_id)
 
+                    # If face_id is not -1, assign the tracker
+                    if face_id != -1:
+                        data['id'] = face_id
+                        data['tracker'] = face_trackers[face_id]
+                        current_frame_data.append(data)
+                else:
+                    continue # Skip duplicate tracking in the same frame
 
         # --- DRAWING & SAMPLING LOGIC ---
         
