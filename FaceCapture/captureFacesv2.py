@@ -21,15 +21,18 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.85
+RECOGNITION_THRESHOLD = 0.85 # Cosine similarity threshold for recognition (0 to 1 scale)
 TARGET_FACE_ID = None 
 
 # Sampling parameters for data collection
 MIN_SAMPLES_FOR_AVERAGE = 50    
 NUM_BEST_FRAMES_TO_SEND = 25
-PROGRESS_BONUS = 0.06
+
+# Weighting parameters
+PROGRESS_BONUS = 0.08 # Bonus added to similarity based on collection progress
 MIN_SHARPNESS_KNOWN = 10.0  # Lower sharpness allowed for known faces
-MIN_SHARPNESS_UNKNOWN = 20.0 # Higher sharpness required for new (unknown) faces
+MIN_SHARPNESS_UNKNOWN = 37.5 # Higher sharpness required for new (unknown) faces
+POSE_QUALITY_THRESHOLD = 0.55  # Minimum pose quality score to consider a face
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
@@ -67,21 +70,85 @@ except Exception as e:
 # --- HELPER FUNCTIONS ---
 
 # Function to preprocess the frame for better face detection
-def preprocess_frame(image):
+def dual_preprocess_frame(image):
+    """ #1 Preprocess the frame to enhance face detection.
+        #2 Neutral frame for recognition.
+    """
+
+    #1
+
+    # Copy original to avoid modifying it directly
+    detection_image = image.copy()
+
     # Reduce compression artifacts
-    image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
-    
-    # Enhance contrast aggressively for longer range (helps with detection)
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
-    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    detection_image = cv2.GaussianBlur(detection_image, (3, 3), 0)
+
+    # Enhance contrast
+    lab = cv2.cvtColor(detection_image, cv2.COLOR_BGR2LAB)
+    lab[:,:,0] = cv2.createCLAHE(clipLimit=2.0).apply(lab[:,:,0])  # Reduced from 3.0
+    detection_image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     
     # Scale image up for better detection of smaller faces
     scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
-    height, width = image.shape[:2]
-    image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+    height, width = detection_image.shape[:2]
+    detection_image = cv2.resize(detection_image, (int(width * scale_factor), int(height * scale_factor)))
 
-    return image
+    #2
+
+    # Copy original to avoid modifying it directly
+    recognition_image = image.copy()
+
+    # Slight blur to reduce noise for recognition
+    recognition_image = cv2.GaussianBlur(recognition_image, (3, 3), 0)
+
+    return detection_image, recognition_image
+
+def normalize_lighting(face_crop):
+    """
+    Apply lighting normalization to make face recognition more consistent
+    across different lighting conditions
+    """
+    if face_crop is None or face_crop.size == 0:
+        return face_crop
+    
+    try:
+        # Convert to LAB color space
+        lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+        
+        # Normalize the L channel (lightness)
+        l_channel = lab[:,:,0]
+        
+        # Apply simple histogram normalization (better than CLAHE for recognition)
+        l_normalized = cv2.normalize(l_channel, None, 0, 255, cv2.NORM_MINMAX)
+        
+        # Merge back
+        lab[:,:,0] = l_normalized
+        normalized = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        
+        return normalized
+        
+    except Exception as e:
+        # If normalization fails, return original
+        return face_crop
+
+def adaptive_lighting_compensation(face_crop):
+    """
+    Smart lighting compensation that only activates when needed
+    """
+    if face_crop is None or face_crop.size == 0:
+        return face_crop
+    
+    # Calculate image statistics to detect lighting issues
+    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+    mean_brightness = np.mean(gray)
+    contrast = np.std(gray)
+    
+    # Only apply compensation if lighting is problematic
+    if mean_brightness < 50 or mean_brightness > 200 or contrast < 25:
+        return normalize_lighting(face_crop)
+    else:
+        # Good lighting, return as-is
+        return face_crop
 
 def get_sharpness_score(image):
     """Calculates the image sharpness using the variance of the Laplacian."""
@@ -89,6 +156,24 @@ def get_sharpness_score(image):
         return 0.0
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+def get_pose_quality_score(landmarks):
+    """Score face pose quality (0-1 scale)"""
+    points_3d = np.array([(lm.x, lm.y, lm.z) for lm in landmarks.landmark])
+    
+    # Check if face is frontal (similar to v1 logic)
+    left_eye = points_3d[33]
+    right_eye = points_3d[263]
+    nose_tip = points_3d[1]
+    
+    # Calculate eye alignment
+    eye_vector = right_eye - left_eye
+    eye_alignment = abs(eye_vector[1]) / np.linalg.norm(eye_vector)
+    
+    # Lower score = more frontal (better)
+    pose_score = 1.0 - min(eye_alignment * 3, 1.0)
+    
+    return pose_score
 
 def get_deepface_embedding(face_crop):
     """
@@ -136,14 +221,14 @@ def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, thr
             
         base_similarity = cosine_similarity(face_encoding, known_encoding)
 
-        # Apply weighting based on face status (using the reduced 0.02 bonus)
+        # Apply weighting based on face status
         if face_id in face_trackers:
             if face_trackers[face_id]['complete']:
                 weighted_similarity = base_similarity + PROGRESS_BONUS  # Small bonus for known faces
             else:
                 samples_collected = len(face_trackers[face_id]['samples'])
                 # Reduced bonus to prevent merging two different people
-                progress_bonus = min(samples_collected / MIN_SAMPLES_FOR_AVERAGE * PROGRESS_BONUS, PROGRESS_BONUS) 
+                progress_bonus = min((samples_collected / MIN_SAMPLES_FOR_AVERAGE) * PROGRESS_BONUS, PROGRESS_BONUS) 
                 weighted_similarity = base_similarity + progress_bonus
         else:
             weighted_similarity = base_similarity
@@ -224,7 +309,7 @@ cap = cv2.VideoCapture(0)
 with mp_face_mesh.FaceMesh(
     max_num_faces=5,
     refine_landmarks=True,
-    min_detection_confidence=0.5,
+    min_detection_confidence=0.75,
     min_tracking_confidence=0.01) as face_mesh:
 
     print("Starting face capture. Press 'Esc' to exit.")
@@ -239,10 +324,11 @@ with mp_face_mesh.FaceMesh(
         #frame = cv2.flip(frame, 1)
 
         # Preprocess frame
-        frame = preprocess_frame(frame)
+        detection_frame, recognition_frame = dual_preprocess_frame(frame)
         frame.flags.writeable = False #improve performance
 
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Use detection frame for Mediapipe
+        rgb_frame = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
 
         current_frame_data = []
@@ -251,7 +337,7 @@ with mp_face_mesh.FaceMesh(
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
                 # Get bounding box (using MediaPipe landmarks)
-                h, w, _ = frame.shape
+                h, w = detection_frame.shape[:2]
                 x_coords = [lm.x * w for lm in face_landmarks.landmark]
                 y_coords = [lm.y * h for lm in face_landmarks.landmark]
                 
@@ -264,6 +350,16 @@ with mp_face_mesh.FaceMesh(
                 if face_width < 80 or face_height < 80:
                     continue
                 
+                # Check if pose quality is acceptable
+                pose_quality = get_pose_quality_score(face_landmarks)
+                if pose_quality < POSE_QUALITY_THRESHOLD:
+                    # frame.flags.writeable = True #debugging
+                    # cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+                    # cv2.putText(frame, f"BAD POSE: {pose_quality:.2f}", (left, top - 10), 
+                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                    # frame.flags.writeable = False
+                    continue
+
                 # Add buffer for cropping
                 buffer_x = int(face_width * 0.15)
                 buffer_y = int(face_height * 0.15)
@@ -271,12 +367,24 @@ with mp_face_mesh.FaceMesh(
                 top = max(0, top - buffer_y); bottom = min(h, bottom + buffer_y)
                 left = max(0, left - buffer_x); right = min(w, right + buffer_x)
 
-                # Extract the face crop for DeepFace
-                face_crop = frame[top:bottom, left:right]
-                sharpness = get_sharpness_score(face_crop)
+                # Convert coordinates back to RECOGNITION frame (original scale)
+                scale_factor = 1.5
+                top_recog = int(top / scale_factor)
+                bottom_recog = int(bottom / scale_factor)
+                left_recog = int(left / scale_factor) 
+                right_recog = int(right / scale_factor)
+
+                # Extract the face crop for DeepFace from neutral recognition frame
+                face_crop = recognition_frame[top_recog:bottom_recog, left_recog:right_recog]
                 
+                # Calculate true sharpness from original frame
+                sharpness = get_sharpness_score(frame[top_recog:bottom_recog, left_recog:right_recog])
+
+                # Apply adaptive lighting normalization
+                face_crop_final = adaptive_lighting_compensation(face_crop)
+
                 # Generate embedding using DeepFace
-                face_encoding = get_deepface_embedding(face_crop) 
+                face_encoding = get_deepface_embedding(face_crop_final) 
 
                 if face_encoding is None:
                     continue
@@ -288,7 +396,8 @@ with mp_face_mesh.FaceMesh(
                     'tracker': None, # Placeholder
                     'crop': face_crop,
                     'sharpness': sharpness,
-                    'encoding': face_encoding
+                    'encoding': face_encoding,
+                    'pose_quality': pose_quality
                 }
                 
                 # Recognize against known faces
@@ -353,6 +462,13 @@ with mp_face_mesh.FaceMesh(
             top, right, bottom, left = data['box']
             sharpness = data['sharpness']
             
+            # Convert coordinates back to scale of original frame
+            scale_factor = 1.5
+            top_orig = int(top / scale_factor)
+            bottom_orig = int(bottom / scale_factor)
+            left_orig = int(left / scale_factor)
+            right_orig = int(right / scale_factor)
+            
             # If the face was too blurry to start, use the temporary drawing info
             if face_id == -1:
                 color = data['color']
@@ -414,10 +530,10 @@ with mp_face_mesh.FaceMesh(
 
             frame.flags.writeable = True
 
-            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-            cv2.putText(frame, display_id, (left, top - 10), 
+            cv2.rectangle(frame, (left_orig, top_orig), (right_orig, bottom_orig), color, 2)
+            cv2.putText(frame, display_id, (left_orig, top_orig - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            cv2.putText(frame, f"{status}", (left, top - 35), 
+            cv2.putText(frame, f"{status}", (left_orig, top_orig - 35), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
 
