@@ -18,7 +18,7 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.85
+RECOGNITION_THRESHOLD = 0.95
 TARGET_FACE_ID = None # Set to None to save all unique faces
 
 # Sampling parameters for data collection
@@ -61,6 +61,23 @@ except Exception as e:
 
 # --- HELPER FUNCTIONS ---
 
+# Function to preprocess the frame for better face detection
+def preprocess_frame(image):
+    # Reduce compression artifacts
+    image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+    
+    # Enhance contrast aggressively for longer range (helps with detection)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
+    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    # Scale image up for better detection of smaller faces
+    scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+    height, width = image.shape[:2]
+    image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+
+    return image
+
 def get_sharpness_score(image):
     """Calculates the image sharpness using the variance of the Laplacian."""
     if image is None or image.size == 0:
@@ -71,7 +88,6 @@ def get_sharpness_score(image):
 def get_pose_normalized_embedding(landmarks):
     """
     Essential pose normalization for handling tilted faces
-    but simplified feature selection
     """
     points_3d = np.array([(lm.x, lm.y, lm.z) for lm in landmarks.landmark])
     
@@ -265,7 +281,7 @@ def save_data_locally(face_id, samples):
 
 # --- MAIN EXECUTION ---
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(2)
 
 # Initialize Face Mesh model
 with mp_face_mesh.FaceMesh(
@@ -284,8 +300,12 @@ with mp_face_mesh.FaceMesh(
             continue
         
         # Flip the frame horizontally for a later selfie-view display
-        frame = cv2.flip(frame, 1)
+        #frame = cv2.flip(frame, 1)
         
+        # Preprocess frame
+        frame = preprocess_frame(frame)
+        frame.flags.writeable = False #improve performance
+
         # Convert to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
@@ -408,6 +428,8 @@ with mp_face_mesh.FaceMesh(
             else:
                 color = (255, 165, 0) # Orange: Non-target (Skip)
                 status = "SKIPPED"
+
+            frame.flags.writeable = True
 
             # --- Drawing on Frame ---
             cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
