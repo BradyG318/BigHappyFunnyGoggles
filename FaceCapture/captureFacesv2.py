@@ -7,12 +7,9 @@ warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapi
 import mediapipe as mp
 from deepface import DeepFace 
 
-# --- DEEPFACE CONFIGURATION ---
-# Using Facenet for a balance of speed and accuracy
-DEEPFACE_MODEL = 'Facenet'  
-DEEPFACE_BACKEND = 'opencv' 
-
 # --- CONFIGURATION ---
+# Using Facenet for a balance of speed and accuracy
+DEEPFACE_MODEL = 'Facenet'
 
 # This is where your collected data will be stored locally.
 DATABASE_FOLDER = "rm_db"
@@ -24,13 +21,13 @@ os.makedirs(FRAMES_FOLDER, exist_ok=True)
 os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
-# Set to 0.90 for optimal separation based on your testing.
-RECOGNITION_THRESHOLD = 0.85  
+RECOGNITION_THRESHOLD = 0.85
 TARGET_FACE_ID = None 
 
 # Sampling parameters for data collection
 MIN_SAMPLES_FOR_AVERAGE = 50    
-NUM_BEST_FRAMES_TO_SEND = 10 
+NUM_BEST_FRAMES_TO_SEND = 25
+PROGRESS_BONUS = 0.06
 MIN_SHARPNESS_KNOWN = 10.0  # Lower sharpness allowed for known faces
 MIN_SHARPNESS_UNKNOWN = 20.0 # Higher sharpness required for new (unknown) faces
 
@@ -69,6 +66,23 @@ except Exception as e:
 
 # --- HELPER FUNCTIONS ---
 
+# Function to preprocess the frame for better face detection
+def preprocess_frame(image):
+    # Reduce compression artifacts
+    image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+    
+    # Enhance contrast aggressively for longer range (helps with detection)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
+    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    # Scale image up for better detection of smaller faces
+    scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+    height, width = image.shape[:2]
+    image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+
+    return image
+
 def get_sharpness_score(image):
     """Calculates the image sharpness using the variance of the Laplacian."""
     if image is None or image.size == 0:
@@ -87,8 +101,7 @@ def get_deepface_embedding(face_crop):
         embeddings = DeepFace.represent(
             img_path=face_crop, 
             model_name=DEEPFACE_MODEL, 
-            enforce_detection=False, 
-            detector_backend=DEEPFACE_BACKEND,
+            enforce_detection=False,
             align=True 			    
         )
         
@@ -126,11 +139,11 @@ def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, thr
         # Apply weighting based on face status (using the reduced 0.02 bonus)
         if face_id in face_trackers:
             if face_trackers[face_id]['complete']:
-                weighted_similarity = base_similarity
+                weighted_similarity = base_similarity + PROGRESS_BONUS  # Small bonus for known faces
             else:
                 samples_collected = len(face_trackers[face_id]['samples'])
                 # Reduced bonus to prevent merging two different people
-                progress_bonus = min(samples_collected / MIN_SAMPLES_FOR_AVERAGE * 0.02, 0.02) 
+                progress_bonus = min(samples_collected / MIN_SAMPLES_FOR_AVERAGE * PROGRESS_BONUS, PROGRESS_BONUS) 
                 weighted_similarity = base_similarity + progress_bonus
         else:
             weighted_similarity = base_similarity
@@ -202,22 +215,7 @@ def save_data_locally(face_id, samples):
     print(f"--- LOCAL SAVE COMPLETE: Face ID #{face_id} ---\n")
     return True
 
-
 # --- MAIN EXECUTION ---
-
-# DeepFace initialization 
-try:
-    print(f"Initializing DeepFace model: {DEEPFACE_MODEL}...")
-    _ = DeepFace.represent(
-        img_path=np.zeros((100, 100, 3), dtype=np.uint8),
-        model_name=DEEPFACE_MODEL,
-        enforce_detection=False,
-        align=True
-    )
-    print("DeepFace model loaded successfully.")
-except Exception as e:
-    print(f"FATAL ERROR: Could not initialize DeepFace model '{DEEPFACE_MODEL}'. Check installation and dependencies. Error: {e}")
-    exit()
 
 # Initialize video capture
 cap = cv2.VideoCapture(0)
@@ -226,7 +224,7 @@ cap = cv2.VideoCapture(0)
 with mp_face_mesh.FaceMesh(
     max_num_faces=5,
     refine_landmarks=True,
-    min_detection_confidence=0.4,
+    min_detection_confidence=0.5,
     min_tracking_confidence=0.01) as face_mesh:
 
     print("Starting face capture. Press 'Esc' to exit.")
@@ -238,7 +236,12 @@ with mp_face_mesh.FaceMesh(
             print("Ignoring empty camera frame.")
             continue
         
-        frame = cv2.flip(frame, 1)
+        #frame = cv2.flip(frame, 1)
+
+        # Preprocess frame
+        frame = preprocess_frame(frame)
+        frame.flags.writeable = False #improve performance
+
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
 
@@ -335,11 +338,11 @@ with mp_face_mesh.FaceMesh(
                 if face_id not in currently_tracked_faces:
                     currently_tracked_faces.add(face_id)
 
-                    # If face_id is not -1, assign the tracker
-                    if face_id != -1:
-                        data['id'] = face_id
-                        data['tracker'] = face_trackers[face_id]
-                        current_frame_data.append(data)
+                # If face_id is not -1, assign the tracker
+                if face_id != -1:
+                    data['id'] = face_id
+                    data['tracker'] = face_trackers[face_id]
+                    current_frame_data.append(data)
                 else:
                     continue # Skip duplicate tracking in the same frame
 
@@ -408,6 +411,8 @@ with mp_face_mesh.FaceMesh(
 
             # --- Drawing on Frame ---
             display_id = f"Face #{face_id}" if face_id != -1 else "Unknown"
+
+            frame.flags.writeable = True
 
             cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
             cv2.putText(frame, display_id, (left, top - 10), 
