@@ -5,20 +5,24 @@ import json
 import warnings
 warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapipe
 import mediapipe as mp
-from deepface import DeepFace 
+from deepface import DeepFace
+import DB_Link
 
 # --- CONFIGURATION ---
+
+# Uncomment for local storage option (instead of database)
+# NOTE: Will need to reimplement old local saving method for this to work
+# DATABASE_FOLDER = "rm_db"
+# VECTORS_FILE = os.path.join(DATABASE_FOLDER, "vectors.json")
+# FRAMES_FOLDER = os.path.join(DATABASE_FOLDER, "best_frames")
+# os.makedirs(FRAMES_FOLDER, exist_ok=True)
+# os.makedirs(DATABASE_FOLDER, exist_ok=True)
+
+# Initialize database connection
+DB_Link.db_link.initialize()
+
 # Using Facenet for a balance of speed and accuracy
 DEEPFACE_MODEL = 'Facenet'
-
-# This is where your collected data will be stored locally.
-DATABASE_FOLDER = "rm_db"
-VECTORS_FILE = os.path.join(DATABASE_FOLDER, "vectors.json")
-FRAMES_FOLDER = os.path.join(DATABASE_FOLDER, "best_frames")
-
-# Ensure necessary folders exist
-os.makedirs(FRAMES_FOLDER, exist_ok=True)
-os.makedirs(DATABASE_FOLDER, exist_ok=True)
 
 # Recognition parameters
 RECOGNITION_THRESHOLD = 0.85 # Cosine similarity threshold for recognition (0 to 1 scale)
@@ -44,32 +48,27 @@ currently_tracked_faces = set()
 # Initialize MediaPipe Face Mesh
 mp_face_mesh = mp.solutions.face_mesh
 
-# --- LOAD EXISTING VECTORS (Persistence) ---
+# --- LOAD EXISTING VECTORS ---
 try:
-    if os.path.exists(VECTORS_FILE):
-        with open(VECTORS_FILE, 'r') as f:
-            loaded_vectors = json.load(f)
-            for face_id_str, vector_list in loaded_vectors.items():
-                face_id = int(face_id_str)
-                known_face_ids.append(face_id)
-                known_face_encodings.append(np.array(vector_list))
-                next_face_id = max(next_face_id, face_id + 1)
-                
-                face_trackers[face_id] = {
-                    'samples': [],
-                    'complete': True 
-                }
-            print(f"Loaded {len(known_face_ids)} existing faces. Next ID will be {next_face_id}.")
-            
-except FileNotFoundError:
-    print("No existing vectors file found. Starting fresh.")
+    vectors_dict = DB_Link.db_link.get_all_vectors()
+    for face_id_str, vector_list in vectors_dict.items():
+        face_id = int(face_id_str)
+        known_face_ids.append(face_id)
+        known_face_encodings.append(np.array(vector_list))
+        next_face_id = max(next_face_id, face_id + 1)
+        
+        face_trackers[face_id] = {
+            'samples': [],
+            'complete': True 
+        }
+    print(f"Loaded {len(known_face_ids)} existing faces from database. Next ID will be {next_face_id}.")
+    
 except Exception as e:
-    print(f"Error loading persistence files: {e}. Starting fresh.")
+    print(f"Error loading from database: {e}. Starting fresh.")
 
 
 # --- HELPER FUNCTIONS ---
 
-# Function to preprocess the frame for better face detection
 def dual_preprocess_frame(image):
     """ #1 Preprocess the frame to enhance face detection.
         #2 Neutral frame for recognition.
@@ -249,55 +248,26 @@ def get_sharpness_threshold(face_id):
     else:
         return MIN_SHARPNESS_UNKNOWN
 
-def save_data_locally(face_id, samples):
+def save_data_to_database(face_id, samples):
     """
     Finalizes the data collection, calculates the final average vector,
-    and saves the vector and best frames to local files.
+    and saves the vector to PostgreSQL database.
     """
-    print(f"\n--- LOCAL SAVE START: Face ID #{face_id} ---")
+    print(f"\n--- DATABASE SAVE START: Face ID #{face_id} ---")
     
     # 1. Calculate the final, averaged face vector
     vectors = np.array([s['vector'] for s in samples])
     final_vector = np.mean(vectors, axis=0)
     
-    # 2. Update and save the vectors JSON file
-    try:
-        if os.path.exists(VECTORS_FILE):
-            with open(VECTORS_FILE, 'r') as f:
-                all_vectors_db = json.load(f)
-        else:
-            all_vectors_db = {}
-    except Exception:
-        all_vectors_db = {}
-        
-    all_vectors_db[str(face_id)] = final_vector.tolist()
+    # 2. Save the final vector to database - synchronous call!
+    success = DB_Link.db_link.save_face_vector(face_id, final_vector.tolist())
     
-    try:
-        with open(VECTORS_FILE, 'w') as f:
-            json.dump(all_vectors_db, f, indent=2)
-        print(f"Vector saved to {VECTORS_FILE}")
-    except Exception as e:
-        print(f"!!! ERROR writing vector to JSON file: {e}")
+    if not success:
+        print(f"!!! ERROR saving vector to database for face #{face_id}")
         return False
     
-    # 3. Select the sharpest frames
-    samples.sort(key=lambda s: s['sharpness'], reverse=True)
-    best_samples = samples[:NUM_BEST_FRAMES_TO_SEND]
-
-    # 4. Save the sharpest frames to disk
-    person_frame_folder = os.path.join(FRAMES_FOLDER, f"Face_{face_id}")
-    os.makedirs(person_frame_folder, exist_ok=True)
-    
-    for i, sample in enumerate(best_samples):
-        filename = os.path.join(person_frame_folder, f"face_{face_id}_sharp_{i+1:02d}.jpg")
-        try:
-            cv2.imwrite(filename, sample['crop'])
-        except Exception as e:
-            print(f"!!! ERROR saving frame {filename}: {e}")
-            return False
-
-    print(f"{len(best_samples)} frames saved to {person_frame_folder}")
-    print(f"--- LOCAL SAVE COMPLETE: Face ID #{face_id} ---\n")
+    print(f"Vector saved to database for Face ID #{face_id}")
+    print(f"--- DATABASE SAVE COMPLETE: Face ID #{face_id} ---\n")
     return True
 
 # --- MAIN EXECUTION ---
@@ -502,7 +472,7 @@ with mp_face_mesh.FaceMesh(
                             
                     # 2. Collection is complete, save data once
                     else:
-                        if save_data_locally(face_id, tracker['samples']):
+                        if save_data_to_database(face_id, tracker['samples']):
                             tracker['complete'] = True
                             color = (0, 0, 255) # Red: Complete (Success)
                             status = "SAVE SUCCESS"
@@ -548,6 +518,11 @@ with mp_face_mesh.FaceMesh(
         
         if cv2.waitKey(5) & 0xFF == 27:
             break
- 
+
+# Uncomment to clear database (for testing purposes)
+#DB_Link.db_link.clear_db()
+
+# Release resources
+DB_Link.db_link.close()
 cv2.destroyAllWindows()
 cap.release()
