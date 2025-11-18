@@ -29,10 +29,10 @@ DEEPFACE_MODEL = 'Facenet512'
 mp_face_mesh = mp.solutions.face_mesh
 
 # Camera index
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.91 # Cosine similarity threshold for recognition (0 to 1 scale)
+RECOGNITION_THRESHOLD = 0.94 # Cosine similarity threshold for recognition (0 to 1 scale)
 TARGET_FACE_ID = None 
 
 # Sampling parameters for data collection
@@ -40,13 +40,15 @@ MIN_SAMPLES_FOR_AVERAGE = 75
 NUM_BEST_FRAMES_TO_SEND = 30
 
 # Misc weighting parameters
-KNOWN_BONUS = 0.03  # Bonus added to similarity for known faces
-PROGRESS_BONUS = 0.02 # Bonus added to similarity based on collection progress
+KNOWN_BONUS = 0.04  # Bonus added to similarity for known faces
+PROGRESS_BONUS = 0.03 # Bonus added to similarity based on collection progress
 
 MIN_SHARPNESS_KNOWN = 15.0  # Lower sharpness allowed for known faces
 MIN_SHARPNESS_UNKNOWN = 35.0 # Higher sharpness required for new (unknown) faces
 
 POSE_QUALITY_THRESHOLD = 0.30  # Minimum pose quality score to consider a face
+
+COLLECTION_THRESHOLD = 0.90  # Lower threshold for collecting new faces
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
@@ -206,9 +208,9 @@ def get_pose_quality_score(landmarks):
 def get_pose_aware_threshold(pose_quality, base_threshold=RECOGNITION_THRESHOLD):
     """Adjust threshold based on pose quality"""
     if pose_quality < 0.4:
-        return base_threshold + 0.05  # Much harder for bad poses
+        return base_threshold - 0.03  # Easier for bad poses
     elif pose_quality < 0.6:
-        return base_threshold + 0.02  # Slightly harder
+        return base_threshold - 0.02  # Slightly easiser for moderate poses
     else:
         return base_threshold  # Normal for good poses
 
@@ -279,31 +281,38 @@ def calculate_center_distance(box1, box2):
     return np.sqrt((center1_x - center2_x)**2 + (center1_y - center2_y)**2)
 
 def get_stable_face_id(current_face, current_frame_data):
-    """Simple consistency based on position and appearance"""
+    """Simple consistency based on position and appearance to prevent duplicates"""
     current_id = current_face['id']
-    if current_id == -1:  # Don't stabilize blurry faces
+    if current_id == -1:
         return current_id
         
     current_pos = current_face['box']
     current_encoding = current_face['encoding']
     
-    # Check if any recent face was in a similar position with similar appearance
+    # Don't stabilize brand new faces (let them establish first)
+    if (current_id in face_trackers and 
+        len(face_trackers[current_id]['samples']) <= 1):
+        previous_face_positions[current_id] = current_pos
+        return current_id
+    
+    # Check for nearby faces
     for prev_id, prev_pos in previous_face_positions.items():
-        if prev_id == -1:  # Skip blurry faces
+        if prev_id == -1 or prev_id == current_id:
             continue
             
         distance = calculate_center_distance(current_pos, prev_pos)
-        if distance < 100:  # 100 pixel threshold
-            # Check if it's the same person by appearance
+        if distance < 80:
             if prev_id in known_face_ids:
                 idx = known_face_ids.index(prev_id)
                 prev_encoding = known_face_encodings[idx]
                 similarity = cosine_similarity(current_encoding, prev_encoding)
-                if similarity > 0.85:  # Same person
+                
+                # Only stabilize if very confident it's the same person
+                if similarity > 0.92:
                     print(f"Stabilized: {current_id} -> {prev_id} (distance: {distance:.1f}, similarity: {similarity:.3f})")
                     return prev_id
     
-    # Update position for this ID
+    # Update last known position
     previous_face_positions[current_id] = current_pos
     return current_id
 
@@ -316,9 +325,6 @@ def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, pos
     best_similarity = -1
     best_match_id = None
 
-    # Get pose-aware threshold
-    effective_threshold = get_pose_aware_threshold(pose_quality)
-
     # Loop through known faces
     for face_id, known_encoding in zip(known_ids, known_encodings):
         base_similarity = cosine_similarity(face_encoding, known_encoding)
@@ -329,23 +335,35 @@ def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, pos
             samples_collected = len(face_trackers[face_id]['samples'])
             progress_ratio = samples_collected / MIN_SAMPLES_FOR_AVERAGE
             
-            if progress_ratio < 0.5:
-                progress_bonus = PROGRESS_BONUS * 0.1 * np.log(1 + 10 * progress_ratio)
+            # More aggressive bonus to prevent spawning new IDs
+            if progress_ratio < 0.3:
+                progress_bonus = PROGRESS_BONUS * 0.3
+            elif progress_ratio < 0.7:
+                progress_bonus = PROGRESS_BONUS * 0.7
             else:
-                progress_bonus = PROGRESS_BONUS * progress_ratio
-
+                progress_bonus = PROGRESS_BONUS * 1.2  # Extra bonus near completion
+                
             weighted_similarity += progress_bonus
+
+            # Lower threshold for ongoing collections
+            effective_threshold = COLLECTION_THRESHOLD
         
         # KNOWN BONUS
-        elif face_id in face_trackers and face_trackers[face_id]['complete']:
-            weighted_similarity += KNOWN_BONUS
+        else:
+            # Usual threshold for known faces
+            effective_threshold = get_pose_aware_threshold(pose_quality)
 
+            # If already complete, add known bonus
+            if face_id in face_trackers and face_trackers[face_id]['complete']:
+                weighted_similarity += KNOWN_BONUS
+
+        # Check if this is the best match so far
         if weighted_similarity > best_similarity and weighted_similarity >= effective_threshold:
             best_similarity = weighted_similarity
             best_match_id = face_id
     
     if best_match_id:
-        print(f"Matched Face #{best_match_id} (similarity: {best_similarity:.3f})")
+        print(f"Matched Face #{best_match_id} (similarity: {best_similarity:.3f}, threshold: {effective_threshold:.3f})")
     
     return best_match_id
 
@@ -475,13 +493,24 @@ with mp_face_mesh.FaceMesh(
                     'pose_quality': pose_quality
                 }
                 
-                # Recognize against known faces OR locked identity from track
+                # Recognize against known faces
                 face_id = None
 
                 if known_face_encodings:
-                    # Only do recognition if no locked identity
                     face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, face_trackers, pose_quality)
                 
+                if face_id is None and known_face_encodings:
+                    # If no match found, check if this is the same as recent faces in similar position
+                    for other_data in current_frame_data:
+                        if other_data['id'] is not None and other_data['id'] != -1:
+                            distance = calculate_center_distance(data['box'], other_data['box'])
+                            if distance < 50:  # Very close - probably same person
+                                similarity = cosine_similarity(face_encoding, other_data['encoding'])
+                                if similarity > 0.85:
+                                    face_id = other_data['id']
+                                    print(f"Frame consistency: using same ID {face_id} for nearby face (similarity: {similarity:.3f})")
+                                    break
+
                 # New face or not recognized
                 if face_id is None:
                     # --- NEW SHARPNESS CHECK FOR UNKNOWN FACES ---
