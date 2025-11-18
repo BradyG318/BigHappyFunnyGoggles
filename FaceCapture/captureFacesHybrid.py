@@ -1,7 +1,5 @@
-import os
 import cv2
 import numpy as np
-import json
 import warnings
 warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapipe
 import mediapipe as mp
@@ -21,32 +19,44 @@ import DB_Link
 # Initialize database connection
 DB_Link.db_link.initialize()
 
+# Uncomment to clear database (for testing purposes)
+DB_Link.db_link.clear_db()
+
 # Using Facenet for a balance of speed and accuracy
-DEEPFACE_MODEL = 'Facenet'
+DEEPFACE_MODEL = 'Facenet512'
+
+# Initialize MediaPipe Face Mesh
+mp_face_mesh = mp.solutions.face_mesh
+
+# Camera index
+CAMERA_INDEX = 1
 
 # Recognition parameters
-RECOGNITION_THRESHOLD = 0.85 # Cosine similarity threshold for recognition (0 to 1 scale)
+RECOGNITION_THRESHOLD = 0.91 # Cosine similarity threshold for recognition (0 to 1 scale)
 TARGET_FACE_ID = None 
 
 # Sampling parameters for data collection
-MIN_SAMPLES_FOR_AVERAGE = 50    
-NUM_BEST_FRAMES_TO_SEND = 25
+MIN_SAMPLES_FOR_AVERAGE = 75
+NUM_BEST_FRAMES_TO_SEND = 30
 
-# Weighting parameters
-PROGRESS_BONUS = 0.08 # Bonus added to similarity based on collection progress
-MIN_SHARPNESS_KNOWN = 10.0  # Lower sharpness allowed for known faces
-MIN_SHARPNESS_UNKNOWN = 37.5 # Higher sharpness required for new (unknown) faces
-POSE_QUALITY_THRESHOLD = 0.55  # Minimum pose quality score to consider a face
+# Misc weighting parameters
+KNOWN_BONUS = 0.03  # Bonus added to similarity for known faces
+PROGRESS_BONUS = 0.02 # Bonus added to similarity based on collection progress
+
+MIN_SHARPNESS_KNOWN = 15.0  # Lower sharpness allowed for known faces
+MIN_SHARPNESS_UNKNOWN = 35.0 # Higher sharpness required for new (unknown) faces
+
+POSE_QUALITY_THRESHOLD = 0.30  # Minimum pose quality score to consider a face
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
 known_face_encodings = [] 
 known_face_ids = [] 
-face_trackers = {} 
-currently_tracked_faces = set() 
 
-# Initialize MediaPipe Face Mesh
-mp_face_mesh = mp.solutions.face_mesh
+face_trackers = {} 
+currently_tracked_faces = set()
+
+previous_face_positions = {} # face_id -> last known position
 
 # --- LOAD EXISTING VECTORS ---
 try:
@@ -65,7 +75,6 @@ try:
     
 except Exception as e:
     print(f"Error loading from database: {e}. Starting fresh.")
-
 
 # --- HELPER FUNCTIONS ---
 
@@ -156,23 +165,52 @@ def get_sharpness_score(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
 
+def get_sharpness_threshold(face_id):
+    """Return appropriate sharpness threshold based on face status"""
+    if face_id in face_trackers and face_trackers[face_id]['complete']:
+        return MIN_SHARPNESS_KNOWN
+    else:
+        return MIN_SHARPNESS_UNKNOWN
+
 def get_pose_quality_score(landmarks):
     """Score face pose quality (0-1 scale)"""
     points_3d = np.array([(lm.x, lm.y, lm.z) for lm in landmarks.landmark])
     
-    # Check if face is frontal (similar to v1 logic)
+    # Key landmarks
     left_eye = points_3d[33]
     right_eye = points_3d[263]
     nose_tip = points_3d[1]
+    chin = points_3d[152]
     
-    # Calculate eye alignment
+    # 1. Roll - eye level alignment
     eye_vector = right_eye - left_eye
-    eye_alignment = abs(eye_vector[1]) / np.linalg.norm(eye_vector)
+    roll_penalty = abs(eye_vector[1]) / np.linalg.norm(eye_vector)
     
-    # Lower score = more frontal (better)
-    pose_score = 1.0 - min(eye_alignment * 3, 1.0)
+    # 2. Pitch - vertical face alignment  
+    face_vertical = chin - nose_tip
+    pitch_penalty = abs(face_vertical[1]) / np.linalg.norm(face_vertical)
+    
+    # 3. Yaw - face symmetry
+    left_dist = np.linalg.norm(left_eye - nose_tip)
+    right_dist = np.linalg.norm(right_eye - nose_tip)
+    yaw_penalty = abs(left_dist - right_dist) / max(left_dist, right_dist)
+    
+    # Combine penalties (lower is better)
+    total_penalty = roll_penalty * 0.5 + pitch_penalty * 0.3 + yaw_penalty * 0.2
+    
+    # Convert to quality score (higher is better)
+    pose_score = max(0, 1.0 - total_penalty * 2)
     
     return pose_score
+
+def get_pose_aware_threshold(pose_quality, base_threshold=RECOGNITION_THRESHOLD):
+    """Adjust threshold based on pose quality"""
+    if pose_quality < 0.4:
+        return base_threshold + 0.05  # Much harder for bad poses
+    elif pose_quality < 0.6:
+        return base_threshold + 0.02  # Slightly harder
+    else:
+        return base_threshold  # Normal for good poses
 
 def get_deepface_embedding(face_crop):
     """
@@ -185,7 +223,7 @@ def get_deepface_embedding(face_crop):
         embeddings = DeepFace.represent(
             img_path=face_crop, 
             model_name=DEEPFACE_MODEL, 
-            enforce_detection=False,
+            # enforce_detection=False,
             align=True 			    
         )
         
@@ -205,48 +243,6 @@ def cosine_similarity(vec1, vec2):
     if norm1 == 0 or norm2 == 0:
         return 0
     return dot_product / (norm1 * norm2)
-
-def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, threshold=RECOGNITION_THRESHOLD):
-    """Performs recognition using weighted cosine similarity."""
-    if face_encoding is None or not known_encodings:
-        return None
-    
-    best_similarity = -1
-    best_match_id = None
-    
-    for face_id, known_encoding in zip(known_ids, known_encodings):
-        if face_encoding.shape != known_encoding.shape:
-            continue
-            
-        base_similarity = cosine_similarity(face_encoding, known_encoding)
-
-        # Apply weighting based on face status
-        if face_id in face_trackers:
-            if face_trackers[face_id]['complete']:
-                weighted_similarity = base_similarity + PROGRESS_BONUS  # Small bonus for known faces
-            else:
-                samples_collected = len(face_trackers[face_id]['samples'])
-                # Reduced bonus to prevent merging two different people
-                progress_bonus = min((samples_collected / MIN_SAMPLES_FOR_AVERAGE) * PROGRESS_BONUS, PROGRESS_BONUS) 
-                weighted_similarity = base_similarity + progress_bonus
-        else:
-            weighted_similarity = base_similarity
-        
-        if weighted_similarity > best_similarity and weighted_similarity > threshold:
-            best_similarity = weighted_similarity
-            best_match_id = face_id
-    
-    if best_match_id:
-        print(f"Matched Face #{best_match_id} (similarity: {best_similarity:.3f})")
-    
-    return best_match_id
-
-def get_sharpness_threshold(face_id):
-    """Return appropriate sharpness threshold based on face status"""
-    if face_id in face_trackers and face_trackers[face_id]['complete']:
-        return MIN_SHARPNESS_KNOWN
-    else:
-        return MIN_SHARPNESS_UNKNOWN
 
 def save_data_to_database(face_id, samples):
     """
@@ -270,10 +266,111 @@ def save_data_to_database(face_id, samples):
     print(f"--- DATABASE SAVE COMPLETE: Face ID #{face_id} ---\n")
     return True
 
+def calculate_center_distance(box1, box2):
+    """Calculate distance between centers of two bounding boxes"""
+    top1, right1, bottom1, left1 = box1
+    top2, right2, bottom2, left2 = box2
+    
+    center1_x = (left1 + right1) / 2
+    center1_y = (top1 + bottom1) / 2
+    center2_x = (left2 + right2) / 2
+    center2_y = (top2 + bottom2) / 2
+    
+    return np.sqrt((center1_x - center2_x)**2 + (center1_y - center2_y)**2)
+
+def get_stable_face_id(current_face, current_frame_data):
+    """Simple consistency based on position and appearance"""
+    current_id = current_face['id']
+    if current_id == -1:  # Don't stabilize blurry faces
+        return current_id
+        
+    current_pos = current_face['box']
+    current_encoding = current_face['encoding']
+    
+    # Check if any recent face was in a similar position with similar appearance
+    for prev_id, prev_pos in previous_face_positions.items():
+        if prev_id == -1:  # Skip blurry faces
+            continue
+            
+        distance = calculate_center_distance(current_pos, prev_pos)
+        if distance < 100:  # 100 pixel threshold
+            # Check if it's the same person by appearance
+            if prev_id in known_face_ids:
+                idx = known_face_ids.index(prev_id)
+                prev_encoding = known_face_encodings[idx]
+                similarity = cosine_similarity(current_encoding, prev_encoding)
+                if similarity > 0.85:  # Same person
+                    print(f"Stabilized: {current_id} -> {prev_id} (distance: {distance:.1f}, similarity: {similarity:.3f})")
+                    return prev_id
+    
+    # Update position for this ID
+    previous_face_positions[current_id] = current_pos
+    return current_id
+
+def recognize_face(face_encoding, known_encodings, known_ids, face_trackers, pose_quality, track_history=None):
+    """Performs recognition using weighted cosine similarity with temporal consistency."""
+    if face_encoding is None or not known_encodings:
+        return None
+    
+    # Initialize best similarity and match id
+    best_similarity = -1
+    best_match_id = None
+
+    # Get pose-aware threshold
+    effective_threshold = get_pose_aware_threshold(pose_quality)
+
+    # Loop through known faces
+    for face_id, known_encoding in zip(known_ids, known_encodings):
+        base_similarity = cosine_similarity(face_encoding, known_encoding)
+        weighted_similarity = base_similarity
+
+        # PROGRESS BONUS
+        if face_id in face_trackers and not face_trackers[face_id]['complete']:
+            samples_collected = len(face_trackers[face_id]['samples'])
+            progress_ratio = samples_collected / MIN_SAMPLES_FOR_AVERAGE
+            
+            if progress_ratio < 0.5:
+                progress_bonus = PROGRESS_BONUS * 0.1 * np.log(1 + 10 * progress_ratio)
+            else:
+                progress_bonus = PROGRESS_BONUS * progress_ratio
+
+            weighted_similarity += progress_bonus
+        
+        # KNOWN BONUS
+        elif face_id in face_trackers and face_trackers[face_id]['complete']:
+            weighted_similarity += KNOWN_BONUS
+
+        if weighted_similarity > best_similarity and weighted_similarity >= effective_threshold:
+            best_similarity = weighted_similarity
+            best_match_id = face_id
+    
+    if best_match_id:
+        print(f"Matched Face #{best_match_id} (similarity: {best_similarity:.3f})")
+    
+    return best_match_id
+
+def find_similar_ongoing_collection(face_encoding, current_face_id):
+    """Check if there's already a collection for this face"""
+    if current_face_id in face_trackers and not face_trackers[current_face_id]['complete']:
+        return current_face_id  # This face is already being collected
+    
+    # Check all ongoing collections
+    for face_id, tracker in face_trackers.items():
+        if not tracker['complete'] and tracker['samples']:
+            # Compare with the first sample of ongoing collection
+            first_sample_vector = tracker['samples'][0]['vector']
+            similarity = cosine_similarity(face_encoding, first_sample_vector)
+            
+            if similarity > 0.88:  # Very high threshold - likely same person
+                print(f"Found similar ongoing collection: {face_id} (similarity: {similarity:.3f})")
+                return face_id
+    
+    return None
+
 # --- MAIN EXECUTION ---
 
 # Initialize video capture
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(CAMERA_INDEX)
 
 # Initialize Face Mesh model
 with mp_face_mesh.FaceMesh(
@@ -284,7 +381,13 @@ with mp_face_mesh.FaceMesh(
 
     print("Starting face capture. Press 'Esc' to exit.")
 
+    # Initialize frame counter for tracking passage of time
+    frame_count = 0
+
     while cap.isOpened():
+        # Increment frame count
+        frame_count += 1
+
         success, frame = cap.read()
         
         if not success:
@@ -318,6 +421,7 @@ with mp_face_mesh.FaceMesh(
                 face_width = right - left
                 face_height = bottom - top
                 if face_width < 80 or face_height < 80:
+                    print(f"Skipped small face detection: {face_width}x{face_height}px")
                     continue
                 
                 # Check if pose quality is acceptable
@@ -328,6 +432,7 @@ with mp_face_mesh.FaceMesh(
                     # cv2.putText(frame, f"BAD POSE: {pose_quality:.2f}", (left, top - 10), 
                     #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                     # frame.flags.writeable = False
+                    print(f"Skipped face due to poor pose quality: {pose_quality:.2f}")
                     continue
 
                 # Add buffer for cropping
@@ -362,7 +467,7 @@ with mp_face_mesh.FaceMesh(
                 # Prepare the data dictionary
                 data = {
                     'id': None, # Placeholder
-                    'box': (top, right, bottom, left),
+                    'box': (top_recog, right_recog, bottom_recog, left_recog),
                     'tracker': None, # Placeholder
                     'crop': face_crop,
                     'sharpness': sharpness,
@@ -370,40 +475,45 @@ with mp_face_mesh.FaceMesh(
                     'pose_quality': pose_quality
                 }
                 
-                # Recognize against known faces
+                # Recognize against known faces OR locked identity from track
                 face_id = None
+
                 if known_face_encodings:
-                    face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, face_trackers)
+                    # Only do recognition if no locked identity
+                    face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, face_trackers, pose_quality)
                 
                 # New face or not recognized
                 if face_id is None:
                     # --- NEW SHARPNESS CHECK FOR UNKNOWN FACES ---
                     required_sharpness = MIN_SHARPNESS_UNKNOWN
                     if sharpness < required_sharpness:
-                        # Temporarily use a placeholder ID (-1) to draw a box but skip tracking
                         face_id = -1 
-                        data['color'] = (0, 100, 255) # Dark Orange: Too blurry to track/start new
+                        data['color'] = (0, 100, 255)
                         data['status'] = f"BLURRY START ({sharpness:.1f}/{required_sharpness:.1f})"
-                    # ---------------------------------------------
-                    
-                    else: # Sharpness is acceptable, proceed with new ID assignment
-                        face_id = next_face_id
+                    else:
+                        # Try to find existing collection first
+                        existing_collection_id = find_similar_ongoing_collection(face_encoding, None)
                         
-                        if face_id not in face_trackers or face_trackers[face_id]['complete']:
+                        if existing_collection_id and existing_collection_id in face_trackers:
+                            # Use existing collection
+                            face_id = existing_collection_id
+                            print(f"Using existing collection {face_id} instead of creating new ID")
+                            data['tracker'] = face_trackers[face_id]
+                        else:
+                            # Create new collection
+                            face_id = next_face_id
                             face_trackers[face_id] = {'samples': [], 'complete': False}
                             known_face_encodings.append(face_encoding)
                             known_face_ids.append(face_id)
                             next_face_id += 1
                             print(f"NEW FACE: ID #{face_id}")
                             
-                            # Immediately add the first sample for a high-quality start
                             face_trackers[face_id]['samples'].append({
                                 'vector': face_encoding,
                                 'crop': face_crop,
                                 'sharpness': sharpness
                             })
                             data['tracker'] = face_trackers[face_id]
-
 
                 if face_id == -1: # Skip blurry faces
                     # Blurry face - set placeholder values
@@ -428,16 +538,12 @@ with mp_face_mesh.FaceMesh(
         # --- DRAWING & SAMPLING LOGIC ---
         
         for data in current_frame_data:
+            # Apply simple stabilization
+            data['id'] = get_stable_face_id(data, current_frame_data)
+
             face_id = data['id']
             top, right, bottom, left = data['box']
             sharpness = data['sharpness']
-            
-            # Convert coordinates back to scale of original frame
-            scale_factor = 1.5
-            top_orig = int(top / scale_factor)
-            bottom_orig = int(bottom / scale_factor)
-            left_orig = int(left / scale_factor)
-            right_orig = int(right / scale_factor)
             
             # If the face was too blurry to start, use the temporary drawing info
             if face_id == -1:
@@ -448,7 +554,6 @@ with mp_face_mesh.FaceMesh(
                 is_target = TARGET_FACE_ID is None or face_id == TARGET_FACE_ID
                 
                 if is_target and not tracker['complete']:
-                    
                     # 1. Sample collection is in progress
                     samples_collected = len(tracker['samples'])
                     
@@ -456,19 +561,17 @@ with mp_face_mesh.FaceMesh(
                         required_sharpness = get_sharpness_threshold(face_id)
 
                         if sharpness >= required_sharpness:
-                            # Only add sample if it's sharp enough and hasn't been added yet (first sample handled above)
-                            if samples_collected == 0 or samples_collected > 0: 
-                                tracker['samples'].append({
-                                    'vector': data['encoding'],
-                                    'crop': data['crop'],
-                                    'sharpness': sharpness
-                                })
+                            # Add sample if it's sharp enough
+                            tracker['samples'].append({
+                                'vector': data['encoding'],
+                                'crop': data['crop'],
+                                'sharpness': sharpness
+                            })
                             color = (0, 255, 0) # Green: Collecting
-                            # samples_collected is accurate after the append
                             status = f"COLLECTING ({len(tracker['samples'])}/{MIN_SAMPLES_FOR_AVERAGE})" 
                         else:
                             color = (255, 255, 0) # Yellow: Too blurry
-                            status = f"BLURRY ({data['sharpness']:.1f}/{required_sharpness:.1f})"
+                            status = f"BLURRY ({sharpness:.1f}/{required_sharpness:.1f})"
                             
                     # 2. Collection is complete, save data once
                     else:
@@ -485,7 +588,7 @@ with mp_face_mesh.FaceMesh(
                             print(f"Finalized Face ID #{face_id}")
                         else:
                             color = (0, 165, 255) # Orange: Complete (Failed save)
-                            status = "SAVE FAILED" 
+                            status = "SAVE FAILED"
                 
                 # 3. Not a target face or already complete
                 elif tracker['complete']:
@@ -500,12 +603,11 @@ with mp_face_mesh.FaceMesh(
 
             frame.flags.writeable = True
 
-            cv2.rectangle(frame, (left_orig, top_orig), (right_orig, bottom_orig), color, 2)
-            cv2.putText(frame, display_id, (left_orig, top_orig - 10), 
+            cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+            cv2.putText(frame, display_id, (left, top - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            cv2.putText(frame, f"{status}", (left_orig, top_orig - 35), 
+            cv2.putText(frame, f"{status}", (left, top - 35), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
 
         # --- DISPLAY STATUS --- 		
         info_text = f"Total Unique People: {next_face_id - 1}. Model: {DEEPFACE_MODEL}"
@@ -518,9 +620,6 @@ with mp_face_mesh.FaceMesh(
         
         if cv2.waitKey(5) & 0xFF == 27:
             break
-
-# Uncomment to clear database (for testing purposes)
-#DB_Link.db_link.clear_db()
 
 # Release resources
 DB_Link.db_link.close()
