@@ -5,11 +5,21 @@ warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapi
 import mediapipe as mp
 from deepface import DeepFace
 import DB_Link
+import math
+
+# For local storage
+import os
+import json
 
 # --- CONFIGURATION ---
 # Initialize database connection
-DB_Link.db_link.initialize()
-DB_Link.db_link.clear_db()
+# DB_Link.db_link.initialize()
+# DB_Link.db_link.clear_db()
+
+# --- LOCAL STORAGE CONFIGURATION ---
+LOCAL_DB_FOLDER = "rm_db"
+LOCAL_DB_FILE = os.path.join(LOCAL_DB_FOLDER, "face_vectors.json")
+os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
 # Initialize ai models
 DEEPFACE_MODEL = 'Facenet512'
@@ -23,32 +33,128 @@ RECOGNITION_THRESHOLD = 0.95 # Cosine similarity threshold for recognition (0 - 
 MIN_SAMPLES_FOR_AVERAGE = 30 # Minimum samples required to compute average vector
 NUM_BEST_FRAMES_TO_SEND = 30 # Number of best quality frames to use for average vector
 
+# PITCH THRESHOLDS (looking up/down)
+PITCH_RATIO_LOW = 0.5    # Looking up threshold
+PITCH_RATIO_HIGH = 1.5   # Looking down threshold
+
+# TILT THRESHOLDS (head rotation - ear to shoulder)  
+TILT_ANGLE_THRESHOLD = 15 # degrees
+
+# YAW THRESHOLD (head turning - left/right)
+YAW_RATIO_THRESHOLD = 0.3  # Absolute value for left/right turning
+
 # DATA STRUCTURES
 next_face_id = 1
 known_face_encodings = [] 
 known_face_ids = []
 face_trackers = {}
 
-# --- LOAD EXISTING VECTORS ---
-try:
-    vectors_dict = DB_Link.db_link.get_all_vectors()
-    for face_id_str, vector_list in vectors_dict.items():
-        face_id = int(face_id_str)
-        known_face_ids.append(face_id)
-        known_face_encodings.append(np.array(vector_list))
-        next_face_id = max(next_face_id, face_id + 1)
-        
-        face_trackers[face_id] = {
-            'samples': [],
-            'complete': True 
-        }
-
-    print(f"Loaded {len(known_face_ids)} existing faces from database. Next ID will be {next_face_id}.")
-    
-except Exception as e:
-    print(f"Error loading from database: {e}. Starting fresh.")
-
 # --- FUNCTIONS ---
+def calculate_3d_angle(point1, point2, point3):
+    """Calculate angle between three 3D points in degrees"""
+    # Convert to vectors
+    v1 = [point1.x - point2.x, point1.y - point2.y, point1.z - point2.z]
+    v2 = [point3.x - point2.x, point3.y - point2.y, point3.z - point2.z]
+    
+    # Dot product
+    dot_product = v1[0]*v2[0] + v1[1]*v2[1] + v1[2]*v2[2]
+    
+    # Magnitudes
+    mag1 = math.sqrt(v1[0]**2 + v1[1]**2 + v1[2]**2)
+    mag2 = math.sqrt(v2[0]**2 + v2[1]**2 + v2[2]**2)
+    
+    # Avoid division by zero
+    if mag1 * mag2 == 0:
+        print("ERROR: DIVIDE BY 0")
+        return 0
+    
+    # Calculate angle in radians and convert to degrees
+    angle_rad = math.acos(max(-1, min(1, dot_product / (mag1 * mag2))))
+    return math.degrees(angle_rad)
+
+def pitch_limit(face_landmarks):
+    """
+    Simple pitch detection using vertical positions
+    Returns True if pitch exceeds threshold
+    """
+    # Key vertical landmarks
+    left_eye = face_landmarks.landmark[33]      # Left eye corner
+    nose_tip = face_landmarks.landmark[1]       # Nose tip  
+    bottom_lip = face_landmarks.landmark[14]    # Bottom lip
+    
+    # Calculate vertical distances (normalized coordinates)
+    eye_to_nose = nose_tip.y - left_eye.y
+    nose_to_mouth = bottom_lip.y - nose_tip.y
+    
+    # The ratio should be relatively constant for straight head
+    ratio = eye_to_nose / (nose_to_mouth + 0.0001)
+    
+    print(f"Eye-nose-mouth ratio: {ratio:.2f}")
+    
+    # If ratio is too small (looking up) or too large (looking down)
+    if ratio < PITCH_RATIO_LOW or ratio > PITCH_RATIO_HIGH:
+        print(f"Pitch limit exceeded - ratio: {ratio:.2f}")
+        return True
+    
+    return False
+
+def tilt_limit(face_landmarks):
+    """
+    Tilt detection using the angle of the line between eyes
+    Returns True if tilt exceeds threshold
+    """
+    # Use outer eye corners
+    left_eye_outer = face_landmarks.landmark[33]    # Left eye outer corner
+    right_eye_outer = face_landmarks.landmark[263]  # Right eye outer corner
+    
+    # Calculate the angle of the eye line
+    delta_y = right_eye_outer.y - left_eye_outer.y
+    delta_x = right_eye_outer.x - left_eye_outer.x
+    
+    # Calculate angle in degrees (-90 to +90)
+    angle_rad = math.atan2(delta_y, delta_x)
+    angle_deg = math.degrees(angle_rad)
+    
+    print(f"Tilt angle: {angle_deg:.1f}°")
+    
+    # If the eye line is not horizontal enough
+    if abs(angle_deg) > TILT_ANGLE_THRESHOLD:  # Allow ±TILT_ANGLE_THRESHOLD degrees of tilt
+        print(f"Tilt limit exceeded - angle: {angle_deg:.1f}°")
+        return True
+    
+    return False
+
+def yaw_limit(face_landmarks):
+    """
+    Simple yaw detection using nose position relative to eyes
+    Returns True if yaw exceeds threshold
+    """
+    # Key landmarks for yaw detection
+    left_eye = face_landmarks.landmark[33]      # Left eye corner
+    right_eye = face_landmarks.landmark[263]    # Right eye corner
+    nose_tip = face_landmarks.landmark[1]       # Nose tip
+    
+    # Calculate eye center
+    eye_center_x = (left_eye.x + right_eye.x) / 2
+    
+    # Calculate how far nose is from center (normalized)
+    nose_center_ratio = (nose_tip.x - eye_center_x) / (abs(right_eye.x - left_eye.x) + 0.0001)
+    
+    print(f"Yaw ratio: {nose_center_ratio:.2f}")
+    
+    # If nose is too far from center
+    if abs(nose_center_ratio) > YAW_RATIO_THRESHOLD:
+        print(f"Yaw limit exceeded - ratio: {nose_center_ratio:.2f}")
+        return True
+    
+    return False
+
+def is_pose_invalid(face_landmarks):
+    # Check if pose violates any pitch/tilt/yaw threshold
+    if (pitch_limit(face_landmarks) or tilt_limit(face_landmarks) or yaw_limit(face_landmarks)):
+        return True
+    
+    return False
 
 def get_deepface_embedding(face_crop):
     """
@@ -102,29 +208,126 @@ def recognize_face(face_encoding, known_face_encodings, known_ids, face_trackers
 
     return best_match_id
 
-def save_data_to_database(face_id, samples):
+# def save_data_to_database(face_id, samples):
+#     """
+#     Finalizes the data collection, calculates the final average vector,
+#     RENORMALIZES and saves the vector to PostgreSQL database.
+#     """
+#     print(f"\n--- DATABASE SAVE START: Face ID #{face_id} ---")
+    
+#     # Calculate the final, averaged face vector
+#     vectors = np.array([s['vector'] for s in samples])
+#     avg_vector = np.mean(vectors, axis=0)
+    
+#     # Re normalize to correct averaging error
+#     final_vector = avg_vector / np.linalg.norm(avg_vector)
+
+#     # Save the final vector to database synchronously
+#     success = DB_Link.db_link.save_face_vector(face_id, final_vector.tolist())
+    
+#     if not success:
+#         print(f"!!! ERROR saving vector to database for face #{face_id}")
+#         return False
+    
+#     print(f"Vector saved to database for Face ID #{face_id}")
+#     print(f"--- DATABASE SAVE COMPLETE: Face ID #{face_id} ---\n")
+#     return True
+
+def save_known_faces_locally():
+    """Saves known_face_ids and known_face_encodings to a JSON file."""
+    try:
+        # Convert numpy arrays to lists for JSON serialization
+        data = {
+            "next_face_id": next_face_id,
+            "faces": [
+                {
+                    "id": known_face_ids[i],
+                    "vector": known_face_encodings[i].tolist() # Convert numpy array to list
+                }
+                for i in range(len(known_face_ids))
+            ]
+        }
+        with open(LOCAL_DB_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+        print(f"Saved {len(known_face_ids)} faces locally to {LOCAL_DB_FILE}")
+        return True
+    except Exception as e:
+        print(f"Error saving local faces: {e}")
+        return False
+
+def save_data_locally(face_id, samples):
     """
     Finalizes the data collection, calculates the final average vector,
-    and saves the vector to PostgreSQL database.
+    RENORMALIZES and saves the vector to local JSON file.
     """
-    print(f"\n--- DATABASE SAVE START: Face ID #{face_id} ---")
+    print(f"\n--- LOCAL SAVE START: Face ID #{face_id} ---")
     
     # Calculate the final, averaged face vector
     vectors = np.array([s['vector'] for s in samples])
-    final_vector = np.mean(vectors, axis=0)
+    avg_vector = np.mean(vectors, axis=0)
     
-    # Save the final vector to database synchronously
-    success = DB_Link.db_link.save_face_vector(face_id, final_vector.tolist())
+    # Re normalize to correct averaging error
+    final_vector = avg_vector / np.linalg.norm(avg_vector)
+
+    # Update the in-memory encoding with the final averaged vector
+    idx = known_face_ids.index(face_id)
+    known_face_encodings[idx] = final_vector
+
+    # Save all known faces to local JSON file
+    success = save_known_faces_locally()
     
     if not success:
-        print(f"!!! ERROR saving vector to database for face #{face_id}")
+        print(f"!!! ERROR saving vector locally for face #{face_id}")
         return False
     
-    print(f"Vector saved to database for Face ID #{face_id}")
-    print(f"--- DATABASE SAVE COMPLETE: Face ID #{face_id} ---\n")
+    print(f"Vector saved locally for Face ID #{face_id}")
+    print(f"--- LOCAL SAVE COMPLETE: Face ID #{face_id} ---\n")
     return True
 
 # --- MAIN ---
+# Load existing vectors
+# try:
+#     vectors_dict = DB_Link.db_link.get_all_vectors()
+#     for face_id_str, vector_list in vectors_dict.items():
+#         face_id = int(face_id_str)
+#         known_face_ids.append(face_id)
+#         known_face_encodings.append(np.array(vector_list))
+#         next_face_id = max(next_face_id, face_id + 1)
+        
+#         face_trackers[face_id] = {
+#             'samples': [],
+#             'complete': True 
+#         }
+
+#     print(f"Loaded {len(known_face_ids)} existing faces from database. Next ID will be {next_face_id}.")
+    
+# except Exception as e:
+#     print(f"Error loading from database: {e}. Starting fresh.")
+
+# Load existing vectors (modified for local file loading)
+try:
+    if os.path.exists(LOCAL_DB_FILE):
+        with open(LOCAL_DB_FILE, 'r') as f:
+            data = json.load(f)
+        
+        # Load global tracking variables
+        next_face_id = data.get("next_face_id", 1)
+        
+        for face_data in data.get("faces", []):
+            face_id = face_data['id']
+            vector = np.array(face_data['vector'])
+            
+            known_face_ids.append(face_id)
+            known_face_encodings.append(vector)
+            # Ensure tracked faces are marked complete at load
+            face_trackers[face_id] = {'samples_collected': 0, 'complete': True, 'best_samples': []} 
+            
+        print(f"Loaded {len(known_face_ids)} existing faces from {LOCAL_DB_FILE}")
+    else:
+        print("No local face data found. Starting fresh.")
+except Exception as e:
+    print(f"Error loading: {e}")
+
 # Start video capture
 cap = cv2.VideoCapture(CAMERA_INDEX)
 
@@ -175,9 +378,13 @@ with mp_face_mesh.FaceMesh(
                 # Skip small detections - uncomment later
                 face_width = right - left
                 face_height = bottom - top
-                # if face_width < 80 or face_height < 80:
-                #     print(f"Skipped small face detection: {face_width}x{face_height}px")
-                #     continue
+                if face_width < 80 or face_height < 80:
+                    print(f"Skipped small face detection: {face_width}x{face_height}px")
+                    continue
+
+                if is_pose_invalid(face_landmarks):
+                    print(f"Skipped invalid pose.")
+                    continue
 
                 # Add buffer for cropping and update coords
                 buffer_x = int(face_width * 0.15)
@@ -273,7 +480,7 @@ with mp_face_mesh.FaceMesh(
                 # If all samples collected
                 else:
                     # Save possible
-                    if save_data_to_database(face_id, tracker['samples']):
+                    if save_data_locally(face_id, tracker['samples']):
                         # Mark sample collection complete
                         tracker['complete'] = True
 
@@ -319,6 +526,6 @@ with mp_face_mesh.FaceMesh(
             break
 
 # Close resources on exit
-DB_Link.db_link.close()
+# DB_Link.db_link.close()
 cap.release()
 cv2.destroyAllWindows()
