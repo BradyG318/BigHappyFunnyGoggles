@@ -4,7 +4,7 @@ import warnings
 warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapipe
 import mediapipe as mp
 from deepface import DeepFace
-import DB_Link
+#import DB_Link
 import math
 
 # For local storage
@@ -28,7 +28,7 @@ mp_face_mesh = mp.solutions.face_mesh
 # PARAMETERS
 CAMERA_INDEX = 0
 
-RECOGNITION_THRESHOLD = 0.95 # Cosine similarity threshold for recognition (0 - 1)
+RECOGNITION_THRESHOLD = 0.85 # Cosine similarity threshold for recognition (0 - 1)
 
 MIN_SAMPLES_FOR_AVERAGE = 30 # Minimum samples required to compute average vector
 NUM_BEST_FRAMES_TO_SEND = 30 # Number of best quality frames to use for average vector
@@ -89,11 +89,11 @@ def pitch_limit(face_landmarks):
     # The ratio should be relatively constant for straight head
     ratio = eye_to_nose / (nose_to_mouth + 0.0001)
     
-    print(f"Eye-nose-mouth ratio: {ratio:.2f}")
+    # print(f"Eye-nose-mouth ratio: {ratio:.2f}")
     
     # If ratio is too small (looking up) or too large (looking down)
     if ratio < PITCH_RATIO_LOW or ratio > PITCH_RATIO_HIGH:
-        print(f"Pitch limit exceeded - ratio: {ratio:.2f}")
+        # print(f"Pitch limit exceeded - ratio: {ratio:.2f}")
         return True
     
     return False
@@ -115,11 +115,11 @@ def tilt_limit(face_landmarks):
     angle_rad = math.atan2(delta_y, delta_x)
     angle_deg = math.degrees(angle_rad)
     
-    print(f"Tilt angle: {angle_deg:.1f}°")
+    # print(f"Tilt angle: {angle_deg:.1f}°")
     
     # If the eye line is not horizontal enough
     if abs(angle_deg) > TILT_ANGLE_THRESHOLD:  # Allow ±TILT_ANGLE_THRESHOLD degrees of tilt
-        print(f"Tilt limit exceeded - angle: {angle_deg:.1f}°")
+        # print(f"Tilt limit exceeded - angle: {angle_deg:.1f}°")
         return True
     
     return False
@@ -140,11 +140,11 @@ def yaw_limit(face_landmarks):
     # Calculate how far nose is from center (normalized)
     nose_center_ratio = (nose_tip.x - eye_center_x) / (abs(right_eye.x - left_eye.x) + 0.0001)
     
-    print(f"Yaw ratio: {nose_center_ratio:.2f}")
+    #print(f"Yaw ratio: {nose_center_ratio:.2f}")
     
     # If nose is too far from center
     if abs(nose_center_ratio) > YAW_RATIO_THRESHOLD:
-        print(f"Yaw limit exceeded - ratio: {nose_center_ratio:.2f}")
+        # print(f"Yaw limit exceeded - ratio: {nose_center_ratio:.2f}")
         return True
     
     return False
