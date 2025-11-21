@@ -3,6 +3,8 @@ DISCARDED
 - ID lock over time
 - Collection vs Identification Mode Switching
 - Stable face region weighting
+- Lightly stabilize recent + nearby matches
+- Clustering similar finalized faces together
 
 CURRENT
 - Calculate average vectors for comparison
@@ -18,7 +20,6 @@ CURRENT
 - Store sharpest subset of samples
 - No two matches at same time to same id (No clones)
 - Just swap the model lol
-- Lightly stabilize recent + nearby matches
 
 FUTURE
 - Store lowest acceptable pose threshold samples?
