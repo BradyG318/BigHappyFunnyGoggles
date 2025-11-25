@@ -28,20 +28,28 @@ mp_face_mesh = mp.solutions.face_mesh
 # PARAMETERS
 CAMERA_INDEX = 0
 
-RECOGNITION_THRESHOLD = 0.85 # Cosine similarity threshold for recognition (0 - 1)
+ID_THRESHOLD = 0.80 # Cosine similarity threshold for ID case (0 - 1)
+CAPTURE_THRESHOLD = 0.90 # Cosine similarity threshold for capture case (0 - 1)
 
 MIN_SAMPLES_FOR_AVERAGE = 30 # Minimum samples required to compute average vector
 NUM_BEST_FRAMES_TO_SEND = 30 # Number of best quality frames to use for average vector
 
+# POSE THRESHOLDS
+# ID is looser, CAPTURE is tighter
 # PITCH THRESHOLDS (looking up/down)
-PITCH_RATIO_LOW = 0.5    # Looking up threshold
-PITCH_RATIO_HIGH = 1.5   # Looking down threshold
+PITCH_RATIO_LOW_ID = 0.3    # Looking up threshold ID - - - - - - - - - - - |: ID WINDOW (0.3 - 2.0)
+PITCH_RATIO_LOW_CAPTURE = 0.6    # Looking up threshold CAPTURE - - - |     |
+#                                                                     |     |
+PITCH_RATIO_HIGH_ID = 2.0   # Looking down threshold ID - - - - - - - | - - |
+PITCH_RATIO_HIGH_CAPTURE = 1.5   # Looking down threshold CAPTURE - - |: CAPTURE WINDOW (0.6 - 1.5)
 
-# TILT THRESHOLDS (head rotation - ear to shoulder)  
-TILT_ANGLE_THRESHOLD = 15 # degrees
+# TILT THRESHOLDS (head rotation - ear to shoulder)
+TILT_ANGLE_THRESHOLD_ID = 15 # degrees ID
+TILT_ANGLE_THRESHOLD_CAPTURE = 10 # degrees CAPTURE
 
 # YAW THRESHOLD (head turning - left/right)
-YAW_RATIO_THRESHOLD = 0.3  # Absolute value for left/right turning
+YAW_RATIO_THRESHOLD_ID = 0.32  # Absolute value for left/right turning ID
+YAW_RATIO_THRESHOLD_CAPTURE = 0.20  # Absolute value for left/right turning CAPTURE
 
 # DATA STRUCTURES
 next_face_id = 1
@@ -72,7 +80,7 @@ def calculate_3d_angle(point1, point2, point3):
     angle_rad = math.acos(max(-1, min(1, dot_product / (mag1 * mag2))))
     return math.degrees(angle_rad)
 
-def pitch_limit(face_landmarks):
+def pitch_limit(face_landmarks, is_Capture=False):
     """
     Simple pitch detection using vertical positions
     Returns True if pitch exceeds threshold
@@ -91,14 +99,24 @@ def pitch_limit(face_landmarks):
     
     # print(f"Eye-nose-mouth ratio: {ratio:.2f}")
     
+    # If checking capture threshold
+    if is_Capture:
+        PITCH_RATIO_LOW = PITCH_RATIO_LOW_CAPTURE
+        PITCH_RATIO_HIGH = PITCH_RATIO_HIGH_CAPTURE
+
+    # Otherwise check id threshold
+    else:
+        PITCH_RATIO_LOW = PITCH_RATIO_LOW_ID
+        PITCH_RATIO_HIGH = PITCH_RATIO_HIGH_ID
+
     # If ratio is too small (looking up) or too large (looking down)
     if ratio < PITCH_RATIO_LOW or ratio > PITCH_RATIO_HIGH:
-        # print(f"Pitch limit exceeded - ratio: {ratio:.2f}")
+        #print(f"Pitch limit exceeded - ratio: {ratio:.2f}")
         return True
     
     return False
 
-def tilt_limit(face_landmarks):
+def tilt_limit(face_landmarks, is_Capture=False):
     """
     Tilt detection using the angle of the line between eyes
     Returns True if tilt exceeds threshold
@@ -115,8 +133,16 @@ def tilt_limit(face_landmarks):
     angle_rad = math.atan2(delta_y, delta_x)
     angle_deg = math.degrees(angle_rad)
     
-    # print(f"Tilt angle: {angle_deg:.1f}°")
+    #print(f"Tilt angle: {angle_deg:.1f}°")
     
+    # If checking capture threshold
+    if is_Capture:
+        TILT_ANGLE_THRESHOLD = TILT_ANGLE_THRESHOLD_CAPTURE
+
+    # Otherwise check id threshold
+    else:
+        TILT_ANGLE_THRESHOLD = TILT_ANGLE_THRESHOLD_ID
+
     # If the eye line is not horizontal enough
     if abs(angle_deg) > TILT_ANGLE_THRESHOLD:  # Allow ±TILT_ANGLE_THRESHOLD degrees of tilt
         # print(f"Tilt limit exceeded - angle: {angle_deg:.1f}°")
@@ -124,7 +150,7 @@ def tilt_limit(face_landmarks):
     
     return False
 
-def yaw_limit(face_landmarks):
+def yaw_limit(face_landmarks, is_Capture=False):
     """
     Simple yaw detection using nose position relative to eyes
     Returns True if yaw exceeds threshold
@@ -142,19 +168,34 @@ def yaw_limit(face_landmarks):
     
     #print(f"Yaw ratio: {nose_center_ratio:.2f}")
     
+    # If checking capture threshold
+    if is_Capture:
+        YAW_RATIO_THRESHOLD = YAW_RATIO_THRESHOLD_CAPTURE
+    
+    # Otherwise check id threshold
+    else:
+        YAW_RATIO_THRESHOLD = YAW_RATIO_THRESHOLD_ID
+
     # If nose is too far from center
     if abs(nose_center_ratio) > YAW_RATIO_THRESHOLD:
-        # print(f"Yaw limit exceeded - ratio: {nose_center_ratio:.2f}")
+        #print(f"Yaw limit exceeded - ratio: {nose_center_ratio:.2f}")
         return True
     
     return False
 
-def is_pose_invalid(face_landmarks):
-    # Check if pose violates any pitch/tilt/yaw threshold
+def is_pose_valid_ID(face_landmarks):
+    # Check if pose violates any pitch/tilt/yaw ID threshold
     if (pitch_limit(face_landmarks) or tilt_limit(face_landmarks) or yaw_limit(face_landmarks)):
-        return True
+        return False
     
-    return False
+    return True
+
+def is_pose_valid_CAPTURE(face_landmarks):
+    # Check if pose violates any pitch/tilt/yaw CAPTURE threshold
+    if (pitch_limit(face_landmarks, True) or tilt_limit(face_landmarks, True) or yaw_limit(face_landmarks, True)):
+        return False
+    
+    return True
 
 def get_deepface_embedding(face_crop):
     """
@@ -188,8 +229,8 @@ def cosine_similarity(vec1, vec2):
         return 0
     return dot_product / (norm1 * norm2)
 
-def recognize_face(face_encoding, known_face_encodings, known_ids, face_trackers):
-    """Performs recognition using weighted cosine similarity with temporal consistency."""
+def recognize_face(face_encoding, known_face_encodings, known_ids, recognition_threshold):
+    """Performs recognition using weighted cosine similarity."""
     if face_encoding is None or not known_face_encodings:
         return None
     
@@ -202,7 +243,7 @@ def recognize_face(face_encoding, known_face_encodings, known_ids, face_trackers
         base_similarity = cosine_similarity(face_encoding, known_encoding)
         
         # Check if this is the best match so far
-        if base_similarity > best_similarity and base_similarity >= RECOGNITION_THRESHOLD:
+        if base_similarity > best_similarity and base_similarity >= recognition_threshold:
             best_similarity = base_similarity
             best_match_id = face_id
 
@@ -285,7 +326,7 @@ def save_data_locally(face_id, samples):
     return True
 
 # --- MAIN ---
-# Load existing vectors
+# Load existing vectors from database
 # try:
 #     vectors_dict = DB_Link.db_link.get_all_vectors()
 #     for face_id_str, vector_list in vectors_dict.items():
@@ -367,6 +408,9 @@ with mp_face_mesh.FaceMesh(
         if results.multi_face_landmarks:
             # Loop through face detections
             for face_landmarks in results.multi_face_landmarks:
+                # Initialize capture boolean to false
+                capture = False
+
                 # Get bounding box (using MediaPipe landmarks)
                 h, w = detection_frame.shape[:2]
                 x_coords = [lm.x * w for lm in face_landmarks.landmark]
@@ -381,8 +425,16 @@ with mp_face_mesh.FaceMesh(
                 if face_width < 80 or face_height < 80:
                     print(f"Skipped small face detection: {face_width}x{face_height}px")
                     continue
+                
+                # Check level of pose validity
+                if is_pose_valid_CAPTURE(face_landmarks):
+                    capture = True
 
-                if is_pose_invalid(face_landmarks):
+                elif is_pose_valid_ID(face_landmarks):
+                    capture = False
+
+                else:
+                    capture = False
                     print(f"Skipped invalid pose.")
                     continue
 
@@ -409,54 +461,83 @@ with mp_face_mesh.FaceMesh(
                     'tracker': None, # Placeholder
                     'crop': face_crop,
                     'encoding': face_encoding,
+                    'capture mode' : capture
                 }
 
                 # Initialize face_id
                 face_id = None
                 
-                if known_face_encodings:
-                    face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, face_trackers)
+                # Check if capture threshold passed
+                if data['capture mode']:
+                    #DEBUG
+                    print("CAPTURE THRESHOLD CASE")
 
-                # New face (or just not recognized)
-                if face_id is None:
-                    # Assign new id
-                    face_id = next_face_id
-                    next_face_id += 1
+                    # Check to ID like usual
+                    if known_face_encodings:
+                        face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, CAPTURE_THRESHOLD)
 
-                    # Initialize face_trackers dictionary entry at new id
-                    face_trackers[face_id] = {
-                        'samples': [],
-                        'complete': False
-                    }
+                    # New face (or just not recognized)
+                    if face_id is None:
+                        # Assign new id
+                        face_id = next_face_id
+                        next_face_id += 1
 
-                    # Add new encoding and id to known lists
-                    known_face_encodings.append(face_encoding)
-                    known_face_ids.append(face_id)
-                
-                    print(f"NEW FACE: ID #{face_id}")
+                        # Initialize face_trackers dictionary entry at new id
+                        face_trackers[face_id] = {
+                            'samples': [],
+                            'complete': False
+                        }
+
+                        # Add new encoding and id to known lists
+                        known_face_encodings.append(face_encoding)
+                        known_face_ids.append(face_id)
                     
-                    # Add encoding and crop to the samples list from the face_trackers dictionart entry at new id
-                    face_trackers[face_id]['samples'].append({
-                        'vector': face_encoding,
-                        'crop': face_crop,
-                    })
+                        print(f"NEW FACE: ID #{face_id}")
+                        
+                        # Add encoding and crop to the samples list from the face_trackers dictionart entry at new id
+                        face_trackers[face_id]['samples'].append({
+                            'vector': face_encoding,
+                            'crop': face_crop,
+                        })
 
-                    # Assign tracker and id for new entry
-                    data['tracker'] = face_trackers[face_id]
-                    data['id'] = face_id
+                        # Assign tracker and id for new entry
+                        data['tracker'] = face_trackers[face_id]
+                        data['id'] = face_id
 
-                    # Add detection data to current frame data
-                    current_frame_data.append(data)
-                
-                # Known faces which have no tracker or id
-                elif (data['tracker'] is None or data['id'] is None):
-                    # Assign tracker and id for new entry
-                    data['tracker'] = face_trackers[face_id]
-                    data['id'] = face_id
+                        # Add detection data to current frame data
+                        current_frame_data.append(data)
+                    
+                    # Known faces which have no tracker or id
+                    elif (data['tracker'] is None or data['id'] is None):
+                        # Assign tracker and id for new entry
+                        data['tracker'] = face_trackers[face_id]
+                        data['id'] = face_id
 
-                    # Add detection data to current frame data
-                    current_frame_data.append(data)
-        
+                        # Add detection data to current frame data
+                        current_frame_data.append(data)
+
+                # We already checked earlier to ensure ID threshold met
+                else:
+                    #DEBUG
+                    print("ID THRESHOLD CASE")
+
+                    # Attempt to identify with a lower threshold, if still fails so be it
+                    if known_face_encodings:
+                        face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids, ID_THRESHOLD)
+                        
+                        # If face identified but tracker and id not yet initialized
+                        if face_id is not None:
+                            if (data['tracker'] is None or data['id'] is None):
+                                # Assign tracker and id for new entry
+                                data['tracker'] = face_trackers[face_id]
+                                data['id'] = face_id
+                        
+                            # Add detection data to current frame data
+                            current_frame_data.append(data)
+                        
+                        else:
+                            continue # Do not draw/sample/anything in this ID only case
+
         # --- SAMPLING ---
         # Loop through all current data
         for data in current_frame_data:
@@ -466,7 +547,9 @@ with mp_face_mesh.FaceMesh(
 
             tracker = data['tracker']
 
-            if not tracker['complete']:
+            capture_mode = data['capture mode']
+
+            if not tracker['complete'] and capture_mode:
                 # If all samples not collected
                 if len(tracker['samples']) < MIN_SAMPLES_FOR_AVERAGE:
                     # Add vector and crop to samples
@@ -499,8 +582,13 @@ with mp_face_mesh.FaceMesh(
                         status = "SAVE FAILED"
             # If tracker complete
             else:
-                color = (0, 0, 255) # Red: Complete (Recognized)
-                status = "RECOGNIZED"
+                # If face actually complete
+                if (tracker['complete']):
+                    color = (0, 0, 255) # Red: Complete (Recognized)
+                    status = "RECOGNIZED"
+                
+                # # If incomplete
+                # else:
         
             # --- DRAWING ---
             display_id = f"Face #{face_id}"
@@ -517,7 +605,7 @@ with mp_face_mesh.FaceMesh(
         info_text = f"Total Unique People: {next_face_id - 1}. Model: {DEEPFACE_MODEL}"
         cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         
-        status_text = f"Threshold: {RECOGNITION_THRESHOLD} | Samples: {MIN_SAMPLES_FOR_AVERAGE}"
+        status_text = f"Threshold: {ID_THRESHOLD} | Samples: {MIN_SAMPLES_FOR_AVERAGE}"
         cv2.putText(frame, status_text, (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         cv2.imshow('DeepFace + MediaPipe Face Recognition Tracker', frame)
