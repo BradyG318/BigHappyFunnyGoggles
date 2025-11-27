@@ -183,8 +183,7 @@ with mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True, min_detection
         success, frame = cap.read()
         if not success:
             print("Failed to grab frame")
-            time.sleep(1)
-            break
+            continue
         
         frame = cv2.flip(frame, 1)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
