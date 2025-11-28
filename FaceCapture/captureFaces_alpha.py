@@ -4,24 +4,26 @@ import warnings
 warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapipe
 import mediapipe as mp
 from deepface import DeepFace
-#import DB_Link
 import math
+
+# For database storage
+#import DB_Link
 
 # For local storage
 import os
 import json
 
 # --- CONFIGURATION ---
-# Initialize database connection
+# DATABASE INITIALIZATION
 # DB_Link.db_link.initialize()
 # DB_Link.db_link.clear_db()
 
-# --- LOCAL STORAGE CONFIGURATION ---
+# LOCAL STORAGE INITIALIZATION
 LOCAL_DB_FOLDER = "rm_db"
 LOCAL_DB_FILE = os.path.join(LOCAL_DB_FOLDER, "face_vectors.json")
 os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
-# Initialize ai models
+# AI MODELS
 DEEPFACE_MODEL = 'Facenet512'
 mp_face_mesh = mp.solutions.face_mesh
 
@@ -29,19 +31,18 @@ mp_face_mesh = mp.solutions.face_mesh
 CAMERA_INDEX = 0
 
 ID_THRESHOLD = 0.80 # Cosine similarity threshold for ID case (0 - 1)
-CAPTURE_THRESHOLD = 0.90 # Cosine similarity threshold for capture case (0 - 1)
+CAPTURE_THRESHOLD = 0.85 # Cosine similarity threshold for capture case (0 - 1)
 
 MIN_SAMPLES_FOR_AVERAGE = 30 # Minimum samples required to compute average vector
-NUM_BEST_FRAMES_TO_SEND = 30 # Number of best quality frames to use for average vector
 
 # POSE THRESHOLDS
 # ID is looser, CAPTURE is tighter
 # PITCH THRESHOLDS (looking up/down)
 PITCH_RATIO_LOW_ID = 0.3    # Looking up threshold ID - - - - - - - - - - - |: ID WINDOW (0.3 - 2.0)
-PITCH_RATIO_LOW_CAPTURE = 0.6    # Looking up threshold CAPTURE - - - |     |
+PITCH_RATIO_LOW_CAPTURE = 0.9    # Looking up threshold CAPTURE - - - |     |
 #                                                                     |     |
 PITCH_RATIO_HIGH_ID = 2.0   # Looking down threshold ID - - - - - - - | - - |
-PITCH_RATIO_HIGH_CAPTURE = 1.5   # Looking down threshold CAPTURE - - |: CAPTURE WINDOW (0.6 - 1.5)
+PITCH_RATIO_HIGH_CAPTURE = 1.5   # Looking down threshold CAPTURE - - |: CAPTURE WINDOW (0.9 - 1.5)
 
 # TILT THRESHOLDS (head rotation - ear to shoulder)
 TILT_ANGLE_THRESHOLD_ID = 15 # degrees ID
@@ -49,7 +50,7 @@ TILT_ANGLE_THRESHOLD_CAPTURE = 10 # degrees CAPTURE
 
 # YAW THRESHOLD (head turning - left/right)
 YAW_RATIO_THRESHOLD_ID = 0.32  # Absolute value for left/right turning ID
-YAW_RATIO_THRESHOLD_CAPTURE = 0.20  # Absolute value for left/right turning CAPTURE
+YAW_RATIO_THRESHOLD_CAPTURE = 0.25  # Absolute value for left/right turning CAPTURE
 
 # DATA STRUCTURES
 next_face_id = 1
@@ -196,6 +197,70 @@ def is_pose_valid_CAPTURE(face_landmarks):
         return False
     
     return True
+
+def is_quality_face(face_crop):
+    """
+    Check if face image has acceptable quality for recognition
+    """
+    if face_crop is None:
+        return False
+    
+    gray = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+    mean_brightness = np.mean(gray)
+    std_brightness = np.std(gray)
+    
+    # Reject overexposed or underexposed faces
+    if mean_brightness > 220 or mean_brightness < 30:
+        return False
+    
+    # Reject low contrast faces
+    if std_brightness < 20:
+        return False
+    
+    return True
+
+def conservative_lighting_normalization(face_crop):
+    """
+    Conservative lighting normalization that preserves facial features
+    Only applies correction when absolutely necessary
+    """
+    if face_crop is None or face_crop.size == 0:
+        return face_crop
+    
+    try:
+        # Convert to LAB color space
+        lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:,:,0]
+        
+        # Calculate lighting statistics
+        mean_brightness = np.mean(l_channel)
+        std_brightness = np.std(l_channel)
+        
+        # Only apply correction in extreme cases
+        if mean_brightness > 200 and std_brightness < 40:  # Severe overexposure
+            # Gentle gamma correction instead of aggressive normalization
+            gamma = 1.3
+            inv_gamma = 1.0 / gamma
+            table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+            corrected = cv2.LUT(face_crop, table)
+            return corrected
+            
+        elif mean_brightness < 40:  # Severe underexposure
+            # Mild brightness boost
+            alpha = 1.2  # Contrast control
+            beta = 30    # Brightness control
+            corrected = cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
+            return corrected
+            
+        else:
+            # For moderate lighting issues, apply very mild normalization
+            l_normalized = cv2.normalize(l_channel, None, 50, 200, cv2.NORM_MINMAX)
+            lab[:,:,0] = l_normalized
+            normalized = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+            return normalized
+            
+    except Exception as e:
+        return face_crop
 
 def get_deepface_embedding(face_crop):
     """
@@ -376,7 +441,7 @@ cap = cv2.VideoCapture(CAMERA_INDEX)
 with mp_face_mesh.FaceMesh(
     max_num_faces=5,
     refine_landmarks=True,
-    min_detection_confidence=0.75,
+    min_detection_confidence=0.65,
     min_tracking_confidence=0.01) as face_mesh:
 
     print("Starting face capture. Press 'Esc' to exit.")
@@ -434,7 +499,6 @@ with mp_face_mesh.FaceMesh(
                     capture = False
 
                 else:
-                    capture = False
                     print(f"Skipped invalid pose.")
                     continue
 
@@ -448,18 +512,29 @@ with mp_face_mesh.FaceMesh(
                 # Crop face region
                 face_crop = recognition_frame[top:bottom, left:right]
 
+                # Check if lighting quality target met
+                if not is_quality_face(face_crop):
+                    print("Skipping low quality face due to lighting")
+                    continue
+                
+                # Apply lighting normalization
+                face_crop_final = conservative_lighting_normalization(face_crop)
+
                 # Generate embedding using DeepFace
-                face_encoding = get_deepface_embedding(face_crop)
+                face_encoding = get_deepface_embedding(face_crop_final)
 
                 if face_encoding is None:
                     continue
                 
+                # Store original encoding for potential consistency tracking - currently scrapped this approach again but maybe something to it for the future
+                original_encoding = face_encoding.copy()
+
                 # Initialize the data dictionary for this face detection
                 data = {
                     'id': None, # Placeholder
                     'box': (top, right, bottom, left),
                     'tracker': None, # Placeholder
-                    'crop': face_crop,
+                    'crop': face_crop_final,
                     'encoding': face_encoding,
                     'capture mode' : capture
                 }
@@ -497,7 +572,7 @@ with mp_face_mesh.FaceMesh(
                         # Add encoding and crop to the samples list from the face_trackers dictionart entry at new id
                         face_trackers[face_id]['samples'].append({
                             'vector': face_encoding,
-                            'crop': face_crop,
+                            'crop': face_crop_final,
                         })
 
                         # Assign tracker and id for new entry
@@ -549,6 +624,10 @@ with mp_face_mesh.FaceMesh(
 
             capture_mode = data['capture mode']
 
+            # Initialize status variables
+            color = (0, 255, 0)  # Default: Green (collecting)
+            status = f"COLLECTING"
+
             if not tracker['complete'] and capture_mode:
                 # If all samples not collected
                 if len(tracker['samples']) < MIN_SAMPLES_FOR_AVERAGE:
@@ -587,8 +666,10 @@ with mp_face_mesh.FaceMesh(
                     color = (0, 0, 255) # Red: Complete (Recognized)
                     status = "RECOGNIZED"
                 
-                # # If incomplete
-                # else:
+                # If not in capture mode but still incomplete (ID threshold only)
+                else:
+                    color = (255, 255, 0)  # Yellow: ID only, not collecting
+                    status = f"ID ONLY ({len(tracker['samples'])}/{MIN_SAMPLES_FOR_AVERAGE})"
         
             # --- DRAWING ---
             display_id = f"Face #{face_id}"
