@@ -11,6 +11,8 @@ import math
 import os
 import json
 
+#NOTE: Hybrid model, includes pose threshold, averaging, ID and Capture cases,
+
 # --- CONFIGURATION ---
 # Initialize database connection
 # DB_Link.db_link.initialize()
