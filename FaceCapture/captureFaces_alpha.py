@@ -37,6 +37,7 @@ MIN_SAMPLES_FOR_AVERAGE = 30 # Minimum samples required to compute average vecto
 
 # POSE THRESHOLDS
 # ID is looser, CAPTURE is tighter
+
 # PITCH THRESHOLDS (looking up/down)
 PITCH_RATIO_LOW_ID = 0.3    # Looking up threshold ID - - - - - - - - - - - |: ID WINDOW (0.3 - 2.0)
 PITCH_RATIO_LOW_CAPTURE = 0.9    # Looking up threshold CAPTURE - - - |     |
