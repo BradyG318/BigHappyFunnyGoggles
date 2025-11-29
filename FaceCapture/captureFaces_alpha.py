@@ -107,7 +107,7 @@ def get_deepface_embedding(face_crop):
         embeddings = DeepFace.represent(
             img_path=face_crop, 
             model_name=DEEPFACE_MODEL, 
-            # enforce_detection=False,
+            enforce_detection=False,
             align=True 			    
         )
         
@@ -289,10 +289,13 @@ with mp_face_mesh.FaceMesh(
                 x_coords = [lm.x * w for lm in face_landmarks.landmark]
                 y_coords = [lm.y * h for lm in face_landmarks.landmark]
 
-                # Store bounding box + pad
+                left, right = int(min(x_coords)), int(max(x_coords))
+                top, bottom = int(min(y_coords)), int(max(y_coords))
+                
+                # Padding
                 pad = 20
-                left, right = max(0, int(min(x_coords)) - pad), min(w, int(max(x_coords)) + pad)
-                top, bottom = max(0, int(min(y_coords)) - pad), min(h, int(max(y_coords)) + pad)
+                left = max(0, left-pad); right = min(w, right+pad)
+                top = max(0, top-pad); bottom = min(h, bottom+pad)
 
                 # Skip small detections
                 face_width = right - left
@@ -301,12 +304,12 @@ with mp_face_mesh.FaceMesh(
                     print(f"Skipped small face detection: {face_width}x{face_height}px")
                     continue
                 
-                # Crop face region BEFORE pose validity check to ensure face has not moved far
+                # Crop face region
                 face_crop = frame[top:bottom, left:right]
 
                 # Set default status
-                status = "Processing..."
-                color = (0, 0, 255) # Red (Default)
+                #status = "Processing..."
+                #color = (0, 0, 255) # Red (Default)
 
                 # Check if face sharp enough
                 sharpness = get_image_sharpness(face_crop)
@@ -315,7 +318,7 @@ with mp_face_mesh.FaceMesh(
                     # Check level of pose validity (either capture mode or id mode)
                     pose_score = get_pose_quality(face_landmarks)
 
-                    if pose_score < POSE_QUALITY_THRESHOLD_CAPTURE: # CAPTURE MODE
+                    if pose_score > POSE_QUALITY_THRESHOLD_CAPTURE: # CAPTURE MODE
                         print("DEBUG CAPTURE MODE")
                         # Image is Sharp & Good Angle -> Get Embedding
                         face_encoding = get_deepface_embedding(face_crop)
@@ -323,7 +326,7 @@ with mp_face_mesh.FaceMesh(
                         # Identify
                         if face_encoding is not None:
                             face_id = recognize_face(face_encoding, known_face_encodings, known_face_ids)
-                                    
+                                  
                             # Check-In New Person
                             if face_id is None:
                                 face_id = next_face_id
@@ -334,11 +337,39 @@ with mp_face_mesh.FaceMesh(
                                 print(f"NEW PERSON: ID #{face_id}")
 
                                 # Tracker Logic
-                                tracker = face_trackers.get(face_id)
+                                tracker = face_trackers[face_id]
+                                
                                 if tracker:
                                     if not tracker['complete']:
                                         if tracker['samples_collected'] < SAMPLES_TO_COLLECT:
-                                                
+                                            # Store Vector + Pose Score + Sharpness Score
+                                            tracker['best_samples'].append({
+                                                'vector': face_encoding, 
+                                                'quality': pose_score,
+                                                'sharpness': sharpness
+                                            })
+                                            
+                                            tracker['samples_collected'] += 1
+                                            color = (255, 165, 0) # Orange
+                                            status = f"ID #{face_id}: {tracker['samples_collected']}/{SAMPLES_TO_COLLECT}"
+                                        
+                                        else:
+                                            finalize_face_vector(face_id)
+                                            color = (0, 255, 0) # Green
+                                            status = f"ID #{face_id} SAVED"
+                                    
+                                    else:
+                                        color = (0, 255, 0) # Green
+                                        status = f"ID #{face_id}" 
+                            
+                            # Face recognized
+                            else:
+                                # Tracker Logic
+                                tracker = face_trackers[face_id]
+                                
+                                if tracker:
+                                    if not tracker['complete']:
+                                        if tracker['samples_collected'] < SAMPLES_TO_COLLECT:
                                             # Store Vector + Pose Score + Sharpness Score
                                             tracker['best_samples'].append({
                                                 'vector': face_encoding, 
@@ -358,12 +389,12 @@ with mp_face_mesh.FaceMesh(
                                     else:
                                         color = (0, 255, 0) # Green
                                         status = f"ID #{face_id}"
-                                
+                                           
                         else:
                             status = "Embed Fail"
                             color = (0, 0, 255)
 
-                    elif pose_score < POSE_QUALITY_THRESHOLD_ID: # ID MODE
+                    elif pose_score > POSE_QUALITY_THRESHOLD_ID: # ID MODE
                         print("DEBUG ID MODE")
                         # Image is Sharp & Good Angle -> Get Embedding
                         face_encoding = get_deepface_embedding(face_crop)
