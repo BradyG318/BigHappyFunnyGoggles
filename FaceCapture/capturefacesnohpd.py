@@ -1,4 +1,3 @@
-import time
 import cv2
 import numpy as np
 import warnings
@@ -24,7 +23,7 @@ DEEPFACE_MODEL = 'Facenet512'
 mp_face_mesh = mp.solutions.face_mesh
 
 #Recongition Threshold 
-RECOGNITION_THRESHOLD = 0.85
+RECOGNITION_THRESHOLD = 0.90
 
 # Overall threshold remains low to allow maximum ROM based on reduced penalties below.
 POSE_QUALITY_THRESHOLD = 0.30 
