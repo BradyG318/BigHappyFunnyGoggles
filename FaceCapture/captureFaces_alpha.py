@@ -35,11 +35,11 @@ DEEPFACE_MODEL = 'Facenet512'
 mp_face_mesh = mp.solutions.face_mesh
 
 # Recongition Threshold 
-RECOGNITION_THRESHOLD = 0.90
+RECOGNITION_THRESHOLD = 0.85
 
 # Overall threshold remains low to allow maximum ROM based on reduced penalties below.
-POSE_QUALITY_THRESHOLD_ID = 0.30 
-POSE_QUALITY_THRESHOLD_CAPTURE = 0.15
+POSE_QUALITY_THRESHOLD_ID = 0.10
+POSE_QUALITY_THRESHOLD_CAPTURE = 0.25
 
 # Sharpness: Laplacian Variance. < 50 is usually very blurry.
 MIN_SHARPNESS_THRESHOLD = 60.0 
