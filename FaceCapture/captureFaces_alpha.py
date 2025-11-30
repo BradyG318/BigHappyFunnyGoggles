@@ -38,11 +38,11 @@ mp_face_mesh = mp.solutions.face_mesh
 RECOGNITION_THRESHOLD = 0.85
 
 # Overall threshold remains low to allow maximum ROM based on reduced penalties below.
-POSE_QUALITY_THRESHOLD_ID = 0.10
-POSE_QUALITY_THRESHOLD_CAPTURE = 0.25
+POSE_QUALITY_THRESHOLD_ID = 0.50
+POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
 
 # Sharpness: Laplacian Variance. < 50 is usually very blurry.
-MIN_SHARPNESS_THRESHOLD = 60.0 
+MIN_SHARPNESS_THRESHOLD = 55.0
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
@@ -95,6 +95,50 @@ def get_image_sharpness(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     score = cv2.Laplacian(gray, cv2.CV_64F).var()
     return score
+
+def conservative_lighting_normalization(face_crop):
+    """
+    Conservative lighting normalization that preserves facial features
+    Only applies correction when absolutely necessary
+    """
+    if face_crop is None or face_crop.size == 0:
+        return face_crop
+    
+    try:
+        # Convert to LAB color space
+        lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:,:,0]
+        
+        # Calculate lighting statistics
+        mean_brightness = np.mean(l_channel)
+        std_brightness = np.std(l_channel)
+        
+        # Only apply correction in extreme cases
+        if mean_brightness > 200 and std_brightness < 40:  # Severe overexposure
+            # Gentle gamma correction instead of aggressive normalization
+            gamma = 1.3
+            inv_gamma = 1.0 / gamma
+            table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+            corrected = cv2.LUT(face_crop, table)
+            return corrected
+            
+        elif mean_brightness < 40:  # Severe underexposure
+            # Mild brightness boost
+            alpha = 1.2  # Contrast control
+            beta = 30    # Brightness control
+            corrected = cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
+            return corrected
+            
+        else:
+            return face_crop
+        #     # For moderate lighting issues, apply very mild normalization
+        #     l_normalized = cv2.normalize(l_channel, None, 50, 200, cv2.NORM_MINMAX)
+        #     lab[:,:,0] = l_normalized
+        #     normalized = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        #     return normalized
+            
+    except Exception as e:
+        return face_crop
 
 def get_deepface_embedding(face_crop):
     """
@@ -149,21 +193,27 @@ def recognize_face(face_encoding, known_face_encodings, known_ids, recognition_t
     return best_match_id
 
 def save_known_faces_locally():
-    """Saves known_face_ids and known_face_encodings to a JSON file."""
+    """Saves only complete face vectors to a JSON file."""
     try:
+        # Filter to only include complete faces
+        complete_faces = []
+        for i in range(len(known_face_ids)):
+            face_id = known_face_ids[i]
+            # Check if this face has a tracker and is complete
+            if face_id in face_trackers and face_trackers[face_id].get('complete', False):
+                complete_faces.append({
+                    "id": face_id,
+                    "vector": known_face_encodings[i].tolist() 
+                })
+        
         data = {
             "next_face_id": next_face_id,
-            "faces": [
-                {
-                    "id": known_face_ids[i],
-                    "vector": known_face_encodings[i].tolist() 
-                }
-                for i in range(len(known_face_ids))
-            ]
+            "faces": complete_faces
         }
+        
         with open(LOCAL_DB_FILE, 'w') as f:
             json.dump(data, f, indent=4)
-        print(f"Saved {len(known_face_ids)} faces locally to {LOCAL_DB_FILE}")
+        print(f"Saved {len(complete_faces)} complete faces locally to {LOCAL_DB_FILE}")
     except Exception as e:
         print(f"Error saving local file: {e}")
 
@@ -306,10 +356,13 @@ with mp_face_mesh.FaceMesh(
                 
                 # Crop face region
                 face_crop = frame[top:bottom, left:right]
+                
+                # Apply lighting normalization ONLY in extreme cases
+                face_crop = conservative_lighting_normalization(face_crop)
 
                 # Set default status
-                #status = "Processing..."
-                #color = (0, 0, 255) # Red (Default)
+                status = "Processing..."
+                color = (0, 0, 255) # Red (Default)
 
                 # Check if face sharp enough
                 sharpness = get_image_sharpness(face_crop)
@@ -318,6 +371,8 @@ with mp_face_mesh.FaceMesh(
                     # Check level of pose validity (either capture mode or id mode)
                     pose_score = get_pose_quality(face_landmarks)
 
+                    print("DEBUG PS: ", pose_score)
+                    
                     if pose_score > POSE_QUALITY_THRESHOLD_CAPTURE: # CAPTURE MODE
                         print("DEBUG CAPTURE MODE")
                         # Image is Sharp & Good Angle -> Get Embedding
