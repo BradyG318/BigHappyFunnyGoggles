@@ -66,7 +66,7 @@ def get_pose_quality(landmarks):
     # 1. Calculate roll (Head Tilt Sideways)
     dY = r_eye[1] - l_eye[1]; dX = r_eye[0] - l_eye[0]
     angle = math.degrees(math.atan2(dY, dX)) 
-    roll_penalty = abs(angle) / 60.0 #Tuning
+    roll_penalty = (abs(angle) / 60.0) * 1.5 #Tuning
     
     # 2. Calculate yaw (Head Turn Left/Right)
     eye_center_x = (l_eye[0] + r_eye[0]) / 2
