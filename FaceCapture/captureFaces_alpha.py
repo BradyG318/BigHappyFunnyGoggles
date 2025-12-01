@@ -7,21 +7,21 @@ from deepface import DeepFace
 import math
 
 # For database storage
-#import DB_Link
+import DB_Link
 
 # For local storage
-import os
-import json
+# import os
+# import json
 
 # --- CONFIGURATION ---
 # Database storage
-# DB_Link.db_link.initialize()
-# DB_Link.db_link.clear_db()
+DB_Link.db_link.initialize()
+#DB_Link.db_link.clear_db()
 
 # Local storage
-LOCAL_DB_FOLDER = "rm_db"
-LOCAL_DB_FILE = os.path.join(LOCAL_DB_FOLDER, "face_vectors.json")
-os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
+# LOCAL_DB_FOLDER = "rm_db"
+# LOCAL_DB_FILE = os.path.join(LOCAL_DB_FOLDER, "face_vectors.json")
+# os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
 # Camera
 CAMERA_INDEX = 0 #ndi plugin
@@ -42,7 +42,7 @@ POSE_QUALITY_THRESHOLD_ID = 0.50
 POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
 
 # Sharpness: Laplacian Variance. < 50 is usually very blurry.
-MIN_SHARPNESS_THRESHOLD = 55.0
+MIN_SHARPNESS_THRESHOLD = 50.0
 
 # --- DATA STRUCTURES ---
 next_face_id = 1
@@ -192,30 +192,47 @@ def recognize_face(face_encoding, known_face_encodings, known_ids, recognition_t
 
     return best_match_id
 
-def save_known_faces_locally():
-    """Saves only complete face vectors to a JSON file."""
-    try:
-        # Filter to only include complete faces
-        complete_faces = []
-        for i in range(len(known_face_ids)):
-            face_id = known_face_ids[i]
-            # Check if this face has a tracker and is complete
-            if face_id in face_trackers and face_trackers[face_id].get('complete', False):
-                complete_faces.append({
-                    "id": face_id,
-                    "vector": known_face_encodings[i].tolist() 
-                })
+# def save_known_faces_locally():
+#     """Saves only complete face vectors to a JSON file."""
+#     try:
+#         # Filter to only include complete faces
+#         complete_faces = []
+#         for i in range(len(known_face_ids)):
+#             face_id = known_face_ids[i]
+#             # Check if this face has a tracker and is complete
+#             if face_id in face_trackers and face_trackers[face_id].get('complete', False):
+#                 complete_faces.append({
+#                     "id": face_id,
+#                     "vector": known_face_encodings[i].tolist() 
+#                 })
         
-        data = {
-            "next_face_id": next_face_id,
-            "faces": complete_faces
-        }
+#         data = {
+#             "next_face_id": next_face_id,
+#             "faces": complete_faces
+#         }
         
-        with open(LOCAL_DB_FILE, 'w') as f:
-            json.dump(data, f, indent=4)
-        print(f"Saved {len(complete_faces)} complete faces locally to {LOCAL_DB_FILE}")
-    except Exception as e:
-        print(f"Error saving local file: {e}")
+#         with open(LOCAL_DB_FILE, 'w') as f:
+#             json.dump(data, f, indent=4)
+#         print(f"Saved {len(complete_faces)} complete faces locally to {LOCAL_DB_FILE}")
+#     except Exception as e:
+#         print(f"Error saving local file: {e}")
+
+def save_data_to_database(face_id, encoding):
+    """
+    Saves the vector to PostgreSQL database.
+    """
+    print(f"\n--- DATABASE SAVE START: Face ID #{face_id} ---")
+
+    # Save the final vector to database synchronously
+    success = DB_Link.db_link.save_face_vector(face_id, encoding.tolist())
+    
+    if not success:
+        print(f"!!! ERROR saving vector to database for face #{face_id}")
+        return False
+    
+    print(f"Vector saved to database for Face ID #{face_id}")
+    print(f"--- DATABASE SAVE COMPLETE: Face ID #{face_id} ---\n")
+    return True
 
 def finalize_face_vector(temp_face_id):
     """
@@ -252,51 +269,51 @@ def finalize_face_vector(temp_face_id):
     tracker['best_samples'] = [] 
     
     print(f"*** FACE {temp_face_id} FINALIZED! Averaged {BEST_SAMPLES_TO_AVERAGE} sharpest samples. ***")
-    save_known_faces_locally()
+    save_data_to_database(temp_face_id, final_vector)
 
 # --- MAIN ---
 # Load existing vectors from database
-# try:
-#     vectors_dict = DB_Link.db_link.get_all_vectors()
-#     for face_id_str, vector_list in vectors_dict.items():
-#         face_id = int(face_id_str)
-#         known_face_ids.append(face_id)
-#         known_face_encodings.append(np.array(vector_list))
-#         next_face_id = max(next_face_id, face_id + 1)
+try:
+    vectors_dict = DB_Link.db_link.get_all_vectors()
+    for face_id_str, vector_list in vectors_dict.items():
+        face_id = int(face_id_str)
+        known_face_ids.append(face_id)
+        known_face_encodings.append(np.array(vector_list))
+        next_face_id = max(next_face_id, face_id + 1)
         
-#         face_trackers[face_id] = {
-#             'samples': [],
-#             'complete': True 
-#         }
+        face_trackers[face_id] = {
+            'samples': [],
+            'complete': True 
+        }
 
-#     print(f"Loaded {len(known_face_ids)} existing faces from database. Next ID will be {next_face_id}.")
+    print(f"Loaded {len(known_face_ids)} existing faces from database. Next ID will be {next_face_id}.")
     
-# except Exception as e:
-#     print(f"Error loading from database: {e}. Starting fresh.")
+except Exception as e:
+    print(f"Error loading from database: {e}. Starting fresh.")
 
 # Load existing vectors (modified for local file loading)
-try:
-    if os.path.exists(LOCAL_DB_FILE):
-        with open(LOCAL_DB_FILE, 'r') as f:
-            data = json.load(f)
+# try:
+#     if os.path.exists(LOCAL_DB_FILE):
+#         with open(LOCAL_DB_FILE, 'r') as f:
+#             data = json.load(f)
         
-        # Load global tracking variables
-        next_face_id = data.get("next_face_id", 1)
+#         # Load global tracking variables
+#         next_face_id = data.get("next_face_id", 1)
         
-        for face_data in data.get("faces", []):
-            face_id = face_data['id']
-            vector = np.array(face_data['vector'])
+#         for face_data in data.get("faces", []):
+#             face_id = face_data['id']
+#             vector = np.array(face_data['vector'])
             
-            known_face_ids.append(face_id)
-            known_face_encodings.append(vector)
-            # Ensure tracked faces are marked complete at load
-            face_trackers[face_id] = {'samples_collected': 0, 'complete': True, 'best_samples': []} 
+#             known_face_ids.append(face_id)
+#             known_face_encodings.append(vector)
+#             # Ensure tracked faces are marked complete at load
+#             face_trackers[face_id] = {'samples_collected': 0, 'complete': True, 'best_samples': []} 
             
-        print(f"Loaded {len(known_face_ids)} existing faces from {LOCAL_DB_FILE}")
-    else:
-        print("No local face data found. Starting fresh.")
-except Exception as e:
-    print(f"Error loading: {e}")
+#         print(f"Loaded {len(known_face_ids)} existing faces from {LOCAL_DB_FILE}")
+#     else:
+#         print("No local face data found. Starting fresh.")
+# except Exception as e:
+#     print(f"Error loading: {e}")
 
 # Start video capture
 cap = cv2.VideoCapture(CAMERA_INDEX)
@@ -371,10 +388,10 @@ with mp_face_mesh.FaceMesh(
                     # Check level of pose validity (either capture mode or id mode)
                     pose_score = get_pose_quality(face_landmarks)
 
-                    print("DEBUG PS: ", pose_score)
+                    #print("DEBUG PS: ", pose_score)
                     
                     if pose_score > POSE_QUALITY_THRESHOLD_CAPTURE: # CAPTURE MODE
-                        print("DEBUG CAPTURE MODE")
+                        #print("DEBUG CAPTURE MODE")
                         # Image is Sharp & Good Angle -> Get Embedding
                         face_encoding = get_deepface_embedding(face_crop)
 
@@ -450,7 +467,7 @@ with mp_face_mesh.FaceMesh(
                             color = (0, 0, 255)
 
                     elif pose_score > POSE_QUALITY_THRESHOLD_ID: # ID MODE
-                        print("DEBUG ID MODE")
+                        #print("DEBUG ID MODE")
                         # Image is Sharp & Good Angle -> Get Embedding
                         face_encoding = get_deepface_embedding(face_crop)
 
