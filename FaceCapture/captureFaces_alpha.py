@@ -24,15 +24,15 @@ DB_Link.db_link.initialize()
 # os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
 # Camera
-CAMERA_INDEX = 0 #ndi plugin
+CAMERA_INDEX = 0 #ndi plugin, 7 for glasses on my laptop
 
 # Face Collection Config
 SAMPLES_TO_COLLECT = 30 
 BEST_SAMPLES_TO_AVERAGE = 10 
 
 # Models
-DEEPFACE_MODEL = 'Facenet512'
 mp_face_mesh = mp.solutions.face_mesh
+DEEPFACE_MODEL = 'Facenet512'
 
 # Recongition Threshold 
 RECOGNITION_THRESHOLD = 0.85
