@@ -3,6 +3,7 @@ import os
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 import asyncio
+import aiofiles
 
 load_dotenv()
 
@@ -80,6 +81,28 @@ class DB_Link:
             print(f"Error clearing database: {e}")
             return False
 
+    async def get_face_image_async(self, id: int) -> Any:
+        """Get face image path by ID and return image data"""
+        try:
+            row = await self.conn.fetchrow('SELECT path FROM faces WHERE id = $1', id)
+            
+            if row:
+                image_path = row['path']
+                if os.path.exists(image_path):
+                    with open(image_path, 'rb') as img_file:
+                        image_data = img_file.read()
+                    return image_data
+                else:
+                    print(f"Image file does not exist: {image_path}")
+                    return None
+            else:
+                print(f"No image path found for ID: {id}")
+                return None
+                
+        except Exception as e:
+            print(f"Error retrieving image from database: {e}")
+            return None
+
     # Synchronous wrappers for async methods
 
     def initialize(self):
@@ -101,6 +124,11 @@ class DB_Link:
         """Synchronous wrapper to clear database"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.clear_db_async())
+
+    def get_face_image(self, id: int):
+        """Synchronous wrapper to get image data by id"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.get_face_image_async())
 
 # Global database handler instance
 db_link = DB_Link()
