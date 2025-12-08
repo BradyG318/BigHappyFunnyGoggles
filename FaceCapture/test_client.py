@@ -1,138 +1,165 @@
+# test_final_working.py
 import socket
 import struct
 import numpy as np
 import cv2
 import time
+
 from FacePacket import FacePacket
 
-def test_tcp_server(host='127.0.0.1', port=5000):
-    """Simple test client for FaceRecognitionTCPServer that uses FacePacket"""
+# run server first obviously
+
+class WorkingClient:
+    def __init__(self, host='127.0.0.1', port=5000):
+        self.host = host
+        self.port = port
+        self.client_socket = None
+        self.seq_num = 0
     
-    def create_test_packet_using_facepacket():
-        """Create a valid packet using FacePacket class"""
-        # Create a dummy face image
-        dummy_face = np.zeros((160, 160, 3), dtype=np.uint8)
-        dummy_face[:80, :, 0] = 255  # Blue top half
-        dummy_face[80:, :, 2] = 255  # Red bottom half
+    def connect(self):
+        """Connect to the server"""
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_socket.settimeout(10.0)
+        self.client_socket.connect((self.host, self.port))
+        print(f"✅ Connected to {self.host}:{self.port}")
+    
+    def disconnect(self):
+        """Disconnect from server"""
+        if self.client_socket:
+            self.client_socket.close()
+        print("✅ Disconnected")
+    
+    def send_and_receive(self, face_crops, recent_ids=None):
+        """Send packet and receive response"""
+        if recent_ids is None:
+            recent_ids = []
         
-        # Add some text for identification
-        cv2.putText(dummy_face, "TEST FACE", (30, 100), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        
-        # Create recent IDs (None will become -1 in serialization)
-        recent_ids = [101, None, 102, None, None]
+        self.seq_num += 1
         
         # Create FacePacket
-        packet = FacePacket([dummy_face], recent_ids)
+        packet = FacePacket(seq_num=self.seq_num, face_crops=face_crops, recent_ids=recent_ids)
+        packet_data = packet.serialize()
         
-        # Serialize it
-        serialized_data = packet.serialize()
+        # Add TCP length prefix
+        tcp_length = len(packet_data)
+        tcp_length_prefix = struct.pack('I', tcp_length)
         
-        # Debug: Print packet structure
-        print(f"\n=== Packet Structure Analysis ===")
-        print(f"Total serialized bytes: {len(serialized_data)}")
+        print(f"\n📤 Sending packet #{self.seq_num} ({len(face_crops)} faces)")
         
-        # Parse the serialized data to verify format
-        if len(serialized_data) >= 4:
-            total_length = struct.unpack('I', serialized_data[:4])[0]
-            print(f"Length prefix (4 bytes): {total_length}")
-            
-            # Header: 1 byte num_faces
-            num_faces = struct.unpack('B', serialized_data[4:5])[0]
-            print(f"Num faces (1 byte): {num_faces}")
-            
-            # 5 recent IDs (20 bytes)
-            pos = 5
-            ids = []
-            for i in range(5):
-                face_id = struct.unpack('i', serialized_data[pos:pos+4])[0]
-                ids.append(face_id)
-                pos += 4
-            print(f"Recent IDs (20 bytes): {ids}")
-            
-            # Crop size (4 bytes)
-            crop_size = struct.unpack('I', serialized_data[pos:pos+4])[0]
-            pos += 4
-            print(f"Crop size (4 bytes): {crop_size}")
-            
-            # Crop data (variable)
-            print(f"Crop data bytes: {len(serialized_data) - pos}")
-            print(f"Total calculated: 4 + 1 + 20 + 4 + crop_data = {4 + 1 + 20 + 4 + crop_size}")
-            print(f"Actual total: {len(serialized_data)}")
-            print("===============================\n")
+        # Send
+        self.client_socket.sendall(tcp_length_prefix + packet_data)
         
-        return serialized_data
+        # Receive response
+        return self._receive_response()
+    
+    def _receive_response(self):
+        """Receive and parse response"""
+        try:
+            # Read TCP length
+            tcp_length_data = self._recv_exactly(4)
+            if not tcp_length_data:
+                return None
+            
+            tcp_length = struct.unpack('I', tcp_length_data)[0]
+            
+            # Read IDPacket data
+            idpacket_data = self._recv_exactly(tcp_length)
+            if not idpacket_data:
+                return None
+            
+            # Parse based on observed format
+            # From debug: responses are 9 bytes: [success][face_id][seq_num]
+            if len(idpacket_data) == 9:
+                success = struct.unpack('?', idpacket_data[0:1])[0]
+                face_id = struct.unpack('I', idpacket_data[1:5])[0]
+                seq_num = struct.unpack('I', idpacket_data[5:9])[0]
+                
+                print(f"📥 Response: success={success}, face_id={face_id}, seq={seq_num}")
+                
+                if success:
+                    print(f"✅ Recognized as Face ID #{face_id}")
+                    return face_id
+                else:
+                    print("❌ Face not recognized")
+                    return None
+            else:
+                print(f"⚠️ Unexpected response format: {len(idpacket_data)} bytes")
+                return None
+            
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            return None
+    
+    def _recv_exactly(self, n):
+        """Receive exactly n bytes"""
+        data = b''
+        while len(data) < n:
+            try:
+                chunk = self.client_socket.recv(n - len(data))
+                if not chunk:
+                    return None
+                data += chunk
+            except socket.timeout:
+                return None
+        return data
+    
+    def create_test_image(self, seed=0):
+        """Create test image"""
+        np.random.seed(seed)
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        color = (np.random.randint(0, 255), 
+                np.random.randint(0, 255), 
+                np.random.randint(0, 255))
+        cv2.rectangle(img, (20, 20), (80, 80), color, -1)
+        return img
+
+def main():
+    print("="*60)
+    print("Face Recognition Server Test - FINAL")
+    print("="*60)
+    
+    client = WorkingClient('127.0.0.1', 5000)
     
     try:
-        print(f"Connecting to {host}:{port}...")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        sock.connect((host, port))
+        client.connect()
         
-        print("Connected! Creating test packet...")
-        
-        # Create and send first test packet
-        packet1 = create_test_packet_using_facepacket()
-        print(f"Sending {len(packet1)} bytes...")
-        
-        # Send the packet
-        sock.sendall(packet1)
-        print("First packet sent successfully!")
-        
-        # Try to receive any response
-        try:
-            sock.settimeout(2)
-            response = sock.recv(1024)
-            if response:
-                print(f"Server response (first {min(100, len(response))} bytes): {response[:100]}...")
-            else:
-                print("No response received (connection closed)")
-        except socket.timeout:
-            print("No response (server may not be sending responses)")
-        
-        # Wait and send a second packet with different data
+        # Wait for server to be ready
         time.sleep(1)
-        print("\nCreating and sending second packet...")
         
-        # Create second face with different properties
-        dummy_face2 = np.ones((160, 160, 3), dtype=np.uint8) * 128
-        dummy_face2[40:120, 40:120, :] = [0, 255, 0]  # Green square in center
-        cv2.putText(dummy_face2, "TEST 2", (50, 80), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        # Test 1: Should fail (no faces in DB)
+        print("\n" + "-"*40)
+        print("Test 1: Recognize face (should fail)")
+        img1 = client.create_test_image(1)
+        result1 = client.send_and_receive([img1], [])
         
-        recent_ids2 = [103, 104, None, 105, None]
-        packet2 = FacePacket([dummy_face2], recent_ids2).serialize()
-        
-        sock.sendall(packet2)
-        print(f"Second packet sent ({len(packet2)} bytes)!")
-        
-        # Test with multiple faces in one packet
         time.sleep(1)
-        print("\nCreating and sending third packet with 2 faces...")
         
-        dummy_face3a = np.zeros((160, 160, 3), dtype=np.uint8)
-        dummy_face3a[:, :80, 0] = 255  # Blue left half
+        # Test 2: Capture new face
+        print("\n" + "-"*40)
+        print("Test 2: Capture new face")
+        images = [client.create_test_image(i) for i in range(3)]
+        result2 = client.send_and_receive(images, [])
         
-        dummy_face3b = np.zeros((160, 160, 3), dtype=np.uint8)
-        dummy_face3b[:, 80:, 2] = 255  # Red right half
+        time.sleep(1)
         
-        recent_ids3 = [106, 107, 108, None, None]
-        packet3 = FacePacket([dummy_face3a, dummy_face3b], recent_ids3).serialize()
+        # Test 3: Recognize the new face
+        print("\n" + "-"*40)
+        print("Test 3: Recognize existing face")
+        img3 = client.create_test_image(1)  # Same as test 1
+        result3 = client.send_and_receive([img3], [1])
         
-        sock.sendall(packet3)
-        print(f"Third packet with 2 faces sent ({len(packet3)} bytes)!")
+        print("\n" + "="*60)
+        print("TEST COMPLETE!")
+        print("="*60)
         
-    except ConnectionRefusedError:
-        print(f"Connection refused. Is the server running on {host}:{port}?")
+    except KeyboardInterrupt:
+        print("\n⚠️ Test interrupted by user")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"\n❌ Test error: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        if 'sock' in locals():
-            sock.close()
-            print("\nConnection closed")
+        client.disconnect()
 
 if __name__ == "__main__":
-    # Test local server
-    test_tcp_server('127.0.0.1', 5000)
+    main()

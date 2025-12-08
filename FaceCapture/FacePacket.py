@@ -4,24 +4,26 @@ import numpy as np
 
 # PROTOCOL DESIGN:
 
-# Header [TCP Packet Length (4 bytes) | NumFaces (1 byte) | RecentFaceIDs (5 * 4 bytes)]
-# Payload [CropSizes (1 or 10 * 4 bytes) | Crops (1 or 10 * variable size)]
+# Header [TCP Packet Length (4 bytes) | Sequence Number (4 bytes)]
+# Payload [NumFaces (1 byte) | RecentIDs (5 * 4 bytes) | CropSizes (1 or 10 * 4 bytes) | Crops (1 or 10 * variable size)]
 
-# Protocol Size = 25 bytes + (1 or 10 * (variable size + 4 bytes))
+# Protocol Size = 29 bytes + (1 or 10 * (variable size + 4 bytes))
 
 # Sent from glasses to server in one of two cases:
 # 1) Re-identify - send 1 face crop
 # 2) Capture new face - send 10 face crops
 
 class FacePacket:
-    def __init__(self, face_crops, recent_face_ids=None):
+    def __init__(self, seq_num, face_crops, recent_ids=None):
+        self.seq_num = seq_num
+        
         self.face_crops = face_crops if isinstance(face_crops, list) else [face_crops]
         
         # Process recent face IDs - always store 5 IDs, None becomes -1 later
-        self.recent_face_ids = [None] * 5  # Initialize with 5 None values
-        if recent_face_ids:
-            for i, face_id in enumerate(recent_face_ids[:5]):
-                self.recent_face_ids[i] = face_id
+        self.recent_ids = [None] * 5  # Initialize with 5 None values
+        if recent_ids:
+            for i, face_id in enumerate(recent_ids[:5]):
+                self.recent_ids[i] = face_id
     
     def serialize(self):
         """Compact binary format with recent IDs"""
@@ -41,26 +43,32 @@ class FacePacket:
                 compressed_crops.append(crop_data)
                 crop_sizes.append(len(crop_data))
         
-        # Header: num_faces(1), then 5 recent IDs (each 4 bytes = 20 bytes)
-        header = struct.pack('B', num_faces)
+        # Pack num faces into payload
+        payload = struct.pack('B', num_faces)
         
         # Add recent face IDs (always 5 IDs, -1 for None)
-        for face_id in self.recent_face_ids[:5]:
+        for face_id in self.recent_ids[:5]:
             id_value = face_id if face_id is not None else -1
-            header += struct.pack('i', id_value)  # 'i' for signed int (allows -1 for None)
+            payload += struct.pack('i', id_value)  # 'i' for signed int (allows -1 for None)
         
         # Add crop sizes for each face
         for crop_size in crop_sizes:
-            header += struct.pack('I', crop_size)  # 4 bytes per crop size
+            payload += struct.pack('I', crop_size)  # 4 bytes per crop size
         
-        # Combine header with all crops
-        packet_data = header
+        # Combine with all crops
         for crop_data in compressed_crops:
-            packet_data += crop_data
+            payload += crop_data
         
-        # Add length prefix for TCP
-        total_length = len(packet_data)
-        return struct.pack('I', total_length) + packet_data  # 4-byte length prefix
+        # Get length prefix for TCP
+        total_length = len(payload) + 4 # 4 bytes for sequence number
+        
+        # Construct header
+        header = struct.pack('I', total_length) + struct.pack('I', self.seq_num)
+        
+        # Contruct complete packet with header
+        complete_packet = header + payload
+        
+        return complete_packet
     
     @staticmethod
     def deserialize(data):
@@ -81,15 +89,19 @@ class FacePacket:
             packet_data = data[4:4 + total_length]
             current_pos = 0
             
-            # Read header
+            # Read sequence number
+            seq_num = struct.unpack('I', packet_data[current_pos:current_pos + 4])[0]
+            current_pos += 4
+            
+            # Read num faces
             num_faces = struct.unpack('B', packet_data[current_pos:current_pos + 1])[0]
             current_pos += 1
             
             # Read exactly 5 recent face IDs
-            recent_face_ids = []
+            recent_ids = []
             for _ in range(5):
                 face_id = struct.unpack('i', packet_data[current_pos:current_pos + 4])[0]
-                recent_face_ids.append(face_id if face_id != -1 else None)
+                recent_ids.append(face_id if face_id != -1 else None)
                 current_pos += 4
             
             # Read crop sizes
@@ -111,7 +123,7 @@ class FacePacket:
                     face_crops.append(face_crop)
                     current_pos += crop_size
             
-            return FacePacket(face_crops, recent_face_ids)
+            return FacePacket(seq_num, face_crops, recent_ids)
             
         except Exception as e:
             print(f"Deserialization error: {e}")
