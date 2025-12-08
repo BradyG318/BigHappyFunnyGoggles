@@ -1,61 +1,62 @@
 import socket
-import threading
 import time
 import struct
 import cv2
-import pickle
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import argparse
 import numpy as np
-import warnings
-warnings.filterwarnings("ignore") # deals with deprecation warnings from mediapipe
-import mediapipe as mp
 from deepface import DeepFace
-import math
 
-from FacePacket import FacePacket
-from IDPacket import IDPacket
+from FacePacket import FacePacket #receive
+from IDPacket import IDPacket #send
 import DB_Link
 
 # Reworked captureFaces_alpha.py into a TCP server structure
 
 class FaceRecognitionServer:
+    # ~~~ CONSTANTS ~~~
+    # Camera
+    CAMERA_INDEX = 0 # 7 for glasses(obs) on my laptop
+
+    # Face Collection Config
+    SAMPLES_TO_COLLECT = 30 
+    BEST_SAMPLES_TO_AVERAGE = 10 
+
+    # Model
+    DEEPFACE_MODEL = 'Facenet512'
+
+    # Recognition Threshold 
+    RECOGNITION_THRESHOLD = 0.85
+
+    # Pose Thresholds (ID is looser than Capture)
+    POSE_QUALITY_THRESHOLD_ID = 0.50
+    POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
+
+    # Sharpness: Laplacian Variance
+    MIN_SHARPNESS_THRESHOLD = 50.0
+    
+    # To avoid duplicate tracking in one session TODO: implement
+    currently_tracked_faces = set()
+    
     # ~~~ SERVER FUNCTIONS ~~~
-    def __init__(self, host='0.0.0.0', port=5000, max_connections=1):
+    def __init__(self, host='0.0.0.0', port=5000):
         """
         TCP Server for receiving face packets
         Args:
             host: Listen address
             port: TCP port
-            max_connections: Maximum concurrent connections
         """
         self.host = host
         self.port = port
-        self.max_connections = max_connections
         
         # TCP Server
         self.server_socket = None
         self.running = False
         
-        # Connection tracking
-        self.active_connections = set()
-        self.connection_lock = threading.Lock()
-        
-        # Processing thread pool
-        self.thread_pool = ThreadPoolExecutor(max_workers=10)
-        
-        # Statistics
-        self.stats = {
-            'connections_total': 0,
-            'connections_active': 0,
-            'packets_received': 0,
-        }
-        
-        # Known faces database
-        self.known_faces = {}  # face_id -> embedding
-        self.face_encodings = []
-        self.face_ids = []
+        # Data structures
+        self.known_face_encodings = {} # face_id -> embedding
+        self.known_face_ids = []
+        self.next_face_id = 1
         
         # Setup logging
         logging.basicConfig(
@@ -64,114 +65,93 @@ class FaceRecognitionServer:
         )
         self.logger = logging.getLogger('FaceRecognitionServer')
         
-    def start(self):
+    def _start(self):
         """Start TCP server"""
         try:
             # Create TCP socket
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(self.max_connections)
-            self.server_socket.settimeout(5.0)  # For graceful shutdown
+            self.server_socket.listen(1) # Only allow 1 connection
+            
+            self.server_socket.settimeout(1.0)  # Set accept timeout to allow graceful shutdown
             
             self.running = True
             
             self.logger.info(f"TCP Server started on {self.host}:{self.port}")
-            self.logger.info(f"Maximum connections: {self.max_connections}")
             
-            # Start connection acceptor thread
-            acceptor_thread = threading.Thread(target=self._accept_connections, daemon=True)
-            acceptor_thread.start()
-            
-            # Start monitor thread
-            monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            monitor_thread.start()
-            
-            # Keep main thread alive
-            try:
-                while self.running:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                self.logger.info("Shutdown requested...")
+            # Main thread
+            while self.running:
+                try:
+                    client_socket, client_addr = self.server_socket.accept()
+                    self.logger.info(f"Accepted connection from {client_addr}")
+                    
+                    # Handle connection
+                    self._accept_connection(client_socket, client_addr)
+                    
+                    # Connection closed, wait for new one
+                    self.logger.info("Connection closed, waiting for new connection...")
+                
+                except KeyboardInterrupt:
+                    self.logger.info("Shutdown requested...")
+                    break
+                
+                except socket.timeout:
+                    continue  # Timeout occurred, loop back to check self.running
+                
+                except Exception as e:
+                    if self.running:
+                        self.logger.error(f"Connection error: {e}")
+                    continue
                 
         except Exception as e:
             self.logger.error(f"Failed to start server: {e}")
-        finally:
-            self.stop()
-    
-    def _accept_connections(self):
-        """Accept incoming TCP connections"""
-        while self.running:
-            try:
-                client_socket, client_addr = self.server_socket.accept()
-                client_socket.settimeout(5.0)  # Set socket timeout
-                
-                # Update stats
-                self.stats['connections_total'] += 1
-                
-                # Create connection handler thread
-                conn_thread = threading.Thread(
-                    target=self._handle_connection,
-                    args=(client_socket, client_addr),
-                    daemon=True
-                )
-                conn_thread.start()
-                
-                # Track connection
-                with self.connection_lock:
-                    self.active_connections.add(client_socket)
-                    self.stats['connections_active'] = len(self.active_connections)
-                
-                self.logger.info(f"New connection from {client_addr}. Active: {self.stats['connections_active']}")
-                
-            except socket.timeout:
-                continue  # Normal for accept with timeout
-            except Exception as e:
-                if self.running:
-                    self.logger.error(f"Accept error: {e}")
-    
-    def _handle_connection(self, client_socket, client_addr):
-        """Handle a single TCP connection"""
-        connection_id = f"{client_addr[0]}:{client_addr[1]}"
-        
-        try:
-            self.logger.debug(f"Handling connection {connection_id}")
             
+        finally:
+            self._stop()
+    
+    def _accept_connection(self, client_socket, client_addr): 
+        """Accept incoming TCP connection from glasses"""
+        try:
+            client_socket.settimeout(30.0)  # Set socket timeout
+                        
+            # Process packets in loop
             while self.running:
-                # Read packet length (4 bytes)
-                length_data = self._recv_exactly(client_socket, 4)
-                if not length_data:
-                    break  # Connection closed
+                try:
+                    # Read packet length prefix (4 bytes)
+                    length_data = self._recv_exactly(client_socket, 4)
+                    
+                    if not length_data:
+                        break  # Connection closed
+                    
+                    packet_length = struct.unpack('I', length_data)[0]
+                    
+                    # Read the actual packet
+                    packet_data = self._recv_exactly(client_socket, packet_length)
+                    
+                    if not packet_data:
+                        break
+                    
+                    # Process packet
+                    seq_num, response = self._process_packet(packet_data, client_addr)
+                    
+                    if response is not None:
+                        self.send_result(client_socket, seq_num, response)
                 
-                packet_length = struct.unpack('I', length_data)[0]
+                except socket.timeout:
+                    self.logger.debug(f"Connection from {client_addr} timed out")
+                    continue # Continue to wait for new packets
                 
-                # Read the actual packet
-                packet_data = self._recv_exactly(client_socket, packet_length)
-                if not packet_data:
+                except ConnectionResetError:
+                    self.logger.info(f"Connection from {client_addr} reset by peer")
                     break
                 
-                # Update stats
-                self.stats['packets_received'] += 1
-                
-                # Submit for processing
-                self.thread_pool.submit(
-                    self._process_packet,
-                    length_data + packet_data, client_addr, connection_id
-                )
-                
-        except socket.timeout:
-            self.logger.warning(f"Connection {connection_id} timed out")
         except Exception as e:
-            self.logger.error(f"Connection {connection_id} error: {e}")
-        finally:
-            # Cleanup
-            client_socket.close()
-            with self.connection_lock:
-                if client_socket in self.active_connections:
-                    self.active_connections.remove(client_socket)
-                    self.stats['connections_active'] = len(self.active_connections)
+            self.logger.error(f"Error accepting connection: {e}")
             
-            self.logger.info(f"Connection {connection_id} closed. Active: {self.stats['connections_active']}")
+        finally:
+            client_socket.close()
+            self.logger.info(f"Connection from {client_addr} closed")
     
     def _recv_exactly(self, sock, n):
         """Receive exactly n bytes from socket"""
@@ -182,40 +162,49 @@ class FaceRecognitionServer:
                 if not chunk:
                     return None  # Connection closed
                 data += chunk
+                
             except socket.timeout:
                 return None
+            
             except Exception as e:
                 self.logger.error(f"Receive error: {e}")
                 return None
+            
         return data
 
-    def _monitor_loop(self):
-        """Monitor server performance"""
-        while self.running:
-            time.sleep(10)  # Log every 10 seconds
+    def _process_packet(self, packet_data, client_addr):
+        """Process a single face packet"""
+        start_time = time.time() #debug
+        
+        try:
+            # Deserialize packet
+            packet = FacePacket.deserialize(packet_data)
             
-            self.logger.info(
-                f"Connections: {self.stats['connections_active']}/{self.stats['connections_total']} | "
-                f"Packets: {self.stats['packets_received']} | "
-            )
+            if packet is None:
+                self.logger.warning(f"Invalid packet from {client_addr}")
+                return None, None
+            
+            # Extract data
+            face_crops = packet.face_crops
+            recent_ids = packet.recent_ids
+            seq_num = packet.seq_num
+            
+            self.logger.debug(f"Processing packet from {client_addr}: {len(face_crops)} faces")
+            
+            # Recognize face/faces
+            result = self.recognize_face(face_crops, recent_ids)
+            
+            self.logger.debug(f"Packet from {client_addr} processed in {time.time() - start_time:.2f}s")
+            return seq_num, result
+            
+        except Exception as e:
+            self.logger.error(f"Packet processing error from {client_addr}: {e}")
+            return None, None
 
-    def stop(self):
+    def _stop(self):
         """Stop server gracefully"""
         self.logger.info("Stopping TCP server...")
         self.running = False
-        
-        # Close all active connections
-        with self.connection_lock:
-            for sock in list(self.active_connections):
-                try:
-                    sock.close()
-                except:
-                    pass
-            self.active_connections.clear()
-        
-        # Shutdown thread pool
-        if self.thread_pool:
-            self.thread_pool.shutdown(wait=True)
         
         # Close server socket
         if self.server_socket:
@@ -223,93 +212,196 @@ class FaceRecognitionServer:
         
         cv2.destroyAllWindows()
         self.logger.info("TCP Server stopped")
-
-    def _process_packet(self, packet_data, client_addr, connection_id):
-        """Process a single face packet"""
-        start_time = time.time()
-        
-        try:
-            # Deserialize packet (note: includes length prefix in packet_data)
-            packet = FacePacket.deserialize(packet_data)
-            
-            if packet is None:
-                self.logger.warning(f"Invalid packet from {connection_id}")
-                return
-            
-            # Extract data
-            face_crops = packet.face_crops
-            recent_ids = packet.recent_face_ids
-            
-            self.logger.debug(f"Processing packet from {connection_id}: {len(face_crops)} faces")
-            
-            # Process each face
-            for i, crop in enumerate(face_crops):
-                if crop is not None:
-                    self._recognize_face(crop, recent_ids, client_addr, i)
-            
-            # Optional: Send response
-            # self._send_response(client_socket, result)
-            
-        except Exception as e:
-            self.logger.error(f"Packet processing error from {connection_id}: {e}")
-        finally:
-            processing_time = time.time() - start_time
-            if processing_time > 0.5:  # Log slow processing
-                self.logger.warning(f"Slow processing: {processing_time:.2f}s for packet from {connection_id}")
     
     # ~~~ FACE RECOGNITION FUNCTIONS ~~~
-    def _recognize_face(self, face_crop, recent_ids, client_addr, face_index): #TBD
+    def get_deepface_embedding(self, face_crop):
         """
-        Face recognition logic
-        TODO: Implement DeepFace recognition here
+        Uses DeepFace to encode the cropped face image into a feature vector (embedding).
+        """
+        if face_crop is None or face_crop.size == 0:
+            return None
+        
+        try:
+            embeddings = DeepFace.represent(
+                img_path=face_crop, 
+                model_name=self.DEEPFACE_MODEL, 
+                enforce_detection=False,
+                align=True 			    
+            )
+            
+            if embeddings:
+                return np.array(embeddings[0]['embedding'])
+            else:
+                return None
+
+        except Exception as e:
+            self.logger.debug(f"DeepFace embedding error: {e}")
+            return None
+    
+    def cosine_similarity(self, vec1, vec2):
+        """Calculate cosine similarity between two vectors (range -1 to 1)"""
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        if norm1 == 0 or norm2 == 0:
+            return 0
+        return dot_product / (norm1 * norm2)
+    
+    def recognize_by_range(self, embedding, face_ids):
+        """
+        Recognize a face embedding against a provided list of face ids.
+        Returns the best matching face id or None.
+        """
+        # Initialize best similarity and match id
+        best_similarity = -1
+        best_match_id = None
+        
+        # Check recent IDs first
+        for face_id in face_ids:
+            if face_id is None:
+                continue
+            
+            if face_id in self.known_face_encodings:
+                similarity = self.cosine_similarity(embedding, self.known_face_encodings[face_id])
+                        
+                if similarity > best_similarity and similarity >= self.RECOGNITION_THRESHOLD:
+                    best_similarity = similarity
+                    best_match_id = face_id
+        
+        # Return best match or None if no match found
+        return best_match_id
+    
+    def recognize_face(self, face_crops, recent_ids):
+        """
+        ID Case (num_faces == 1):
+            Creates an embedding for the single face sent
+            Checks it against recent IDs
+        Capture Case (num_faces > 1):
+            Creates averaged representations of faces sent
+            Checks them against recent IDs
+            Checks them against known faces in database
+            Creates new ID if no match found
+        Returns recognized face ID or None
         """
         try:
-            # Example: Display face (debug only)
-            if self.logger.level <= logging.DEBUG:
-                window_name = f"Face from {client_addr[0]}:{face_index}"
-                cv2.imshow(window_name, face_crop)
-                cv2.waitKey(1)
+            # Check number of faces sent (check ID vs Capture)
+            num_faces = len(face_crops)
             
-            # Log face details
-            self.logger.debug(f"Face {face_index} from {client_addr[0]}: {face_crop.shape}")
+            if num_faces == 1: #ID Case
+                # Get encoding for single face
+                embedding = self.get_deepface_embedding(face_crops[0])
+                
+                # Check recent IDs first
+                match_id = self.recognize_by_range(embedding, recent_ids)
+                
+                if match_id is not None:
+                    self.logger.info(f"Face recognized as ID #{match_id}")
+                    
+                    return match_id
+                
+                else:
+                    self.logger.info("Face not recognized")
+                    
+                    return None
             
-            # TODO: Implement recognition
-            # 1. Use DeepFace to get embedding
-            # 2. Check recent_ids first (temporal locality)
-            # 3. Check all known faces
-            # 4. Update tracking
+            elif num_faces > 1: #Capture Case
+                # Get encoding for each face
+                embeddings = [None] * num_faces
+                
+                for i, crop in enumerate(face_crops):
+                    embeddings[i] = self.get_deepface_embedding(crop)
+                    
+                # Average and Normalize
+                avg_vector = np.mean(embeddings, axis=0)
+                final_vector = avg_vector / np.linalg.norm(avg_vector)
+            
+                # Check through all known faces (includes recent IDs)
+                match_id = self.recognize_by_range(final_vector, self.known_face_ids)
+                
+                # If match found, send back result
+                if match_id is not None:
+                    self.logger.info(f"Captured face recognized as ID #{match_id}")
+                    
+                    return match_id
+                
+                # No match found, assign new ID and save to database
+                else:
+                    # New face, assign new ID
+                    new_face_id = self.next_face_id
+                    self.next_face_id += 1
+                    
+                    # Save new face encoding
+                    self.known_face_ids.append(new_face_id)
+                    self.known_face_encodings[new_face_id] = final_vector
+                    
+                    # Save to database
+                    self.save_data_to_database(new_face_id, final_vector)
+                    
+                    self.logger.info(f"New face assigned ID #{new_face_id}")
+                    
+                    return new_face_id
             
         except Exception as e:
             self.logger.error(f"Face recognition error: {e}")
     
-    def _send_response(self, client_socket, result): #TBD
-        """Send recognition result back to client BY IDPacket"""
+    def send_result(self, client_socket, seq_num, result):
+        """Send recognition result back to client by IDPacket"""
         try:
-            # Example response format
-            response = {
-                'status': 'processed',
-                'timestamp': time.time(),
-                'matches': result
-            }
-            response_data = pickle.dumps(response)
-            response_length = struct.pack('I', len(response_data))
-            client_socket.sendall(response_length + response_data)
+            # Create IDPacket based on result
+            if result is not None:
+                response_packet = IDPacket(True, seq_num, result)
+            else:
+                response_packet = IDPacket(False)
+            
+            response_data = response_packet.serialize()
+            
+            client_socket.sendall(response_data)
+            
+            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
+            
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
     
-    def add_known_face(self, face_id, embedding): #TBD
-        """Add a known face to database"""
-        self.known_faces[face_id] = embedding
-        self.face_ids.append(face_id)
-        self.face_encodings.append(embedding)
+    def load_data_from_database(self):
+        # Load existing vectors from database
+        try:            
+            vectors_dict = DB_Link.db_link.get_all_vectors()
+            for face_id_str, vector_list in vectors_dict.items():
+                face_id = int(face_id_str) # Convert string key to int
+                self.known_face_ids.append(face_id)
+                self.known_face_encodings[face_id] = np.array(vector_list)
+                self.next_face_id = max(self.next_face_id, face_id + 1)
+
+            self.logger.info(f"Loaded {len(self.known_face_ids)} existing faces from database. Next ID will be {self.next_face_id}.")
+        
+        except Exception as e:
+            self.logger.error(f"Error loading from database: {e}. Starting fresh.")
+    
+    def save_data_to_database(self, face_id, encoding):
+        """
+        Saves the vector to PostgreSQL database.
+        """
+        # Save the final vector to database synchronously
+        success = DB_Link.db_link.save_face_vector(face_id, encoding.tolist())
+    
+        if not success:
+            self.logger.error(f"!!! ERROR saving vector to database for face #{face_id}")
+            return False
+
         self.logger.info(f"Added face ID {face_id} to database")
+        
+        return True
 
 # ~~~ MAIN ~~~
 if __name__ == "__main__":    
+    # --- CONFIGURATION ---
+    # Database initialization
+    DB_Link.db_link.initialize()
+    DB_Link.db_link.clear_db() # For testing, clear on startup
+    
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
     parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
-    parser.add_argument('--max-conn', type=int, default=10, help='Maximum connections')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
     args = parser.parse_args()
@@ -321,15 +413,17 @@ if __name__ == "__main__":
     # Create and start server
     server = FaceRecognitionServer(
         host=args.host,
-        port=args.port,
-        max_connections=args.max_conn
+        port=args.port
     )
     
+    # Load known faces from database
+    server.load_data_from_database()
+    
     try:
-        server.start()
+        server._start() #_start -> _accept_connection -> _process_packet -> recognize_face
     except KeyboardInterrupt:
-        server.logger.info("Server interrupted by user")
+        server.logger.info("Server shutdown requested by user")
     except Exception as e:
         server.logger.error(f"Server error: {e}")
     finally:
-        server.stop()
+        server._stop()
