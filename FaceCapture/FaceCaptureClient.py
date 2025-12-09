@@ -20,7 +20,7 @@ from IDPacket import IDPacket
 # Network
 SERVER_HOST = '127.0.0.1' 
 SERVER_PORT = 5000 
-TIMEOUT = 5.0 
+TIMEOUT = 30.0 
 
 # Camera
 CAMERA_INDEX = 0 
@@ -37,10 +37,12 @@ POSE_QUALITY_THRESHOLD_ID = 0.50
 POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
 SHARPNESS_THRESHOLD = 50.0 
 
+
+
 # Utility functions 
 
 
-def get_pose_quality(landmarks: mp.solutions.face_mesh.NormalizedLandmarks) -> float:
+def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
     lm = landmarks.landmark
     l_eye = np.array([lm[33].x, lm[33].y]); r_eye = np.array([lm[263].x, lm[263].y])
@@ -90,7 +92,7 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
     except Exception:
         return face_crop
 
-def get_face_crop(frame: np.ndarray, face_landmarks: mp.solutions.face_mesh.NormalizedLandmarks) -> Optional[np.ndarray]:
+def get_face_crop(frame: np.ndarray, face_landmarks) -> Optional[np.ndarray]:
     """Extracts and crops the face from the frame based on landmarks and padding."""
     h, w = frame.shape[:2]
     x_coords = [lm.x * w for lm in face_landmarks.landmark]
@@ -117,6 +119,7 @@ class FaceCaptureClient:
         self.port = port
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
         self.recent_face_ids: List[Optional[int]] = [None] * 5
+        self.seq_num = 0 #initialize at 0, increment where needed
         
         # Capture Mode State
         self.is_capturing_new_face = False
@@ -226,7 +229,7 @@ class FaceCaptureClient:
                                 if len(self.capture_crops) >= BEST_SAMPLES_TO_AVERAGE:
                                     # Accumulation complete: Send the final 10-crop packet
                                     
-                                    packet = FacePacket(self.capture_crops, self.recent_face_ids)
+                                    packet = FacePacket(self.seq_num, self.capture_crops, self.recent_face_ids)
                                     response = self._send_packet_and_receive_id(packet)
                                     
                                     # Reset mode immediately after sending the packet
@@ -237,6 +240,8 @@ class FaceCaptureClient:
                                         # Enrollment Successful
                                         status = f"Enrollment Complete! ID: {response.face_id}"
                                         color = (0, 255, 0) # Green
+                                        
+                                        self.seq_num += 1 #WARNING/DEBUG: THIS IS NOT CORRECT PLACEMENT, WILL NEED TO BE UPDATED TO ASSOCIATE WITH A SPECIFIC DETECTION
                                     else:
                                         status = "Enrollment Failed (Server Error)"
                                         color = (0, 0, 255) # Red
@@ -247,7 +252,7 @@ class FaceCaptureClient:
 
                             else:
                                 # MODE: IDENTIFICATION (Send 1 crop)
-                                packet = FacePacket([processed_face_crop], self.recent_face_ids)
+                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
                                 response = self._send_packet_and_receive_id(packet)
                                 
                                 if response and response.success and response.face_id:
