@@ -132,11 +132,11 @@ class FaceRecognitionServer:
                     if not packet_data:
                         break
                     
-                    # Process packet
-                    seq_num, response = self._process_packet(packet_data, client_addr)
+                    # Process full packet
+                    seq_num, response = self._process_packet(length_data + packet_data, client_addr)
                     
-                    if response is not None:
-                        self.send_result(client_socket, seq_num, response)
+                    # Send back response with recognition result
+                    self.send_result(client_socket, seq_num, response)
                 
                 except socket.timeout:
                     self.logger.debug(f"Connection from {client_addr} timed out")
@@ -349,7 +349,7 @@ class FaceRecognitionServer:
         try:
             # Create IDPacket based on result
             if result is not None:
-                response_packet = IDPacket(True, seq_num, result)
+                response_packet = IDPacket(True, result, seq_num)
             else:
                 response_packet = IDPacket(False)
             
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     # --- CONFIGURATION ---
     # Database initialization
     DB_Link.db_link.initialize()
-    DB_Link.db_link.clear_db() # For testing, clear on startup
+    #DB_Link.db_link.clear_db() # For testing, clear on startup
     
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')

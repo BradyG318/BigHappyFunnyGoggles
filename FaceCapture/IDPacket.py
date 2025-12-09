@@ -4,12 +4,12 @@ import numpy as np
 
 # PROTOCOL DESIGN:
 
-# Structure: [length (4 bytes)][success (1 byte)]{if success: seq_num (4 bytes)][if success: face_id (4 bytes)]
+# Structure: [length (4 bytes)][success (1 byte)][if success: face_id (4 bytes)][if success: seq_num (4 bytes)]
 
 # Protocol Size = 13 bytes if success, else 5 bytes
 
 class IDPacket:
-    def __init__(self, success, seq_num=None, face_id=None):
+    def __init__(self, success, face_id=None, seq_num=None):
         self.success = success
         self.face_id = face_id
         self.seq_num = seq_num
@@ -55,9 +55,12 @@ class IDPacket:
             else:
                 # Read packet data
                 face_id = struct.unpack('I', packet_data[current_pos:current_pos + 4])[0]
-                seq_num = struct.unpack('I', packet_data[current_pos + 4:current_pos + 8])[0]
                 
-                return IDPacket(True, seq_num, face_id)
+                current_pos += 4
+                
+                seq_num = struct.unpack('I', packet_data[current_pos:current_pos + 4])[0]
+                
+                return IDPacket(True, face_id, seq_num)
         
         except Exception as e:
             print(f"Deserialization error: {e}")
