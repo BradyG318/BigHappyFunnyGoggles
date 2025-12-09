@@ -121,6 +121,10 @@ class FaceCaptureClient:
         self.recent_face_ids: List[Optional[int]] = [None] * 5
         self.seq_num = 0 #initialize at 0, increment where needed
         
+        # Persistent Socket
+        self.sock = None
+        self._connect_to_server()
+        
         # Capture Mode State
         self.is_capturing_new_face = False
         self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
@@ -130,13 +134,33 @@ class FaceCaptureClient:
         
     # Networking functions 
 
-    def _recv_exactly(self, sock: socket.socket, n: int) -> Optional[bytes]:
+    def _connect_to_server(self):
+        """Establish or re-establish connection to server"""
+        try:
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
+            
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(TIMEOUT)
+            self.sock.connect((self.host, self.port))
+            print(f"[INFO] Connected to server at {self.host}:{self.port}")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to connect to server: {e}")
+            self.sock = None
+            return False
+        return True
+
+    def _recv_exactly(self, n: int) -> Optional[bytes]:
         """Receive exactly n bytes from socket, handling fragmented reads."""
         data = b''
         while len(data) < n:
             try:
-                chunk = sock.recv(n - len(data))
-                if not chunk: return None
+                chunk = self.sock.recv(n - len(data))
+                if not chunk: return None # Connection closed
                 data += chunk
             except socket.timeout:
                 raise socket.timeout("Timed out waiting for full packet.")
@@ -146,31 +170,46 @@ class FaceCaptureClient:
 
     def _send_packet_and_receive_id(self, packet: FacePacket) -> Optional[IDPacket]:
         """Connects to server, sends packet, and receives IDPacket reliably."""
+        if not self.sock:
+            if not self._connect_to_server():
+                return None
+        
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(TIMEOUT)
-                s.connect((self.host, self.port))
+            serialized_packet = packet.serialize()
+            self.sock.sendall(serialized_packet)
                 
-                serialized_packet = packet.serialize()
-                s.sendall(serialized_packet)
+            # Receive IDPacket length (4 bytes)
+            response_len_data = self._recv_exactly(4)
                 
-                # Receive IDPacket length (4 bytes)
-                response_len_data = self._recv_exactly(s, 4)
-                if not response_len_data: return None
+            # Handle connection loss and attempt to reconnect
+            if not response_len_data: 
+                # Connection broken, try to reconnect
+                print("[WARN] Connection lost, reconnecting...")
+                if not self._connect_to_server():
+                    return None
+                # Retry sending the packet
+                self.sock.sendall(serialized_packet)
+                response_len_data = self._recv_exactly(4)
+                if not response_len_data:
+                    return None
                 
-                response_len = struct.unpack('I', response_len_data)[0]
+            response_len = struct.unpack('I', response_len_data)[0]
                 
-                # Receive the IDPacket payload
-                response_payload = self._recv_exactly(s, response_len)
-                if not response_payload: return None
+            # Receive the IDPacket payload
+            response_payload = self._recv_exactly(response_len)
+            if not response_payload: return None
                 
-                return IDPacket.deserialize(response_len_data + response_payload)
+            return IDPacket.deserialize(response_len_data + response_payload)
                 
         except socket.timeout as e:
             print(f"[ERROR] Socket timeout: {e}")
+            # Attempt to reconnect
+            self._connect_to_server()
             return None
         except socket.error as e:
             print(f"[ERROR] Socket error: {e}")
+            # Attempt to reconnect
+            self._connect_to_server()
             return None
         except Exception as e:
             print(f"[ERROR] Network communication error: {e}")
@@ -232,6 +271,9 @@ class FaceCaptureClient:
                                     packet = FacePacket(self.seq_num, self.capture_crops, self.recent_face_ids)
                                     response = self._send_packet_and_receive_id(packet)
                                     
+                                    if response:
+                                        self.seq_num += 1
+                                    
                                     # Reset mode immediately after sending the packet
                                     self.is_capturing_new_face = False
                                     self.capture_crops = []
@@ -241,7 +283,6 @@ class FaceCaptureClient:
                                         status = f"Enrollment Complete! ID: {response.face_id}"
                                         color = (0, 255, 0) # Green
                                         
-                                        self.seq_num += 1 #WARNING/DEBUG: THIS IS NOT CORRECT PLACEMENT, WILL NEED TO BE UPDATED TO ASSOCIATE WITH A SPECIFIC DETECTION
                                     else:
                                         status = "Enrollment Failed (Server Error)"
                                         color = (0, 0, 255) # Red
@@ -254,6 +295,9 @@ class FaceCaptureClient:
                                 # MODE: IDENTIFICATION (Send 1 crop)
                                 packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
                                 response = self._send_packet_and_receive_id(packet)
+                                
+                                if response:
+                                    self.seq_num += 1
                                 
                                 if response and response.success and response.face_id:
                                     # KNOWN FACE (Re-ID successful)
@@ -284,7 +328,11 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-
+        
+        # Cleanup
+        if self.sock:
+            self.sock.close()
+        
         self.cap.release()
         cv2.destroyAllWindows()
 
