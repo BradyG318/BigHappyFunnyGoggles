@@ -124,7 +124,7 @@ class FaceRecognitionServer:
                     if not length_data:
                         break  # Connection closed
                     
-                    packet_length = struct.unpack('I', length_data)[0]
+                    packet_length = struct.unpack('<I', length_data)[0]
                     
                     # Read the actual packet
                     packet_data = self._recv_exactly(client_socket, packet_length)
@@ -222,6 +222,9 @@ class FaceRecognitionServer:
             return None
         
         try:
+            # Convert from Unity's RGB to BGR for OpenCV
+            face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
+            
             embeddings = DeepFace.represent(
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
@@ -326,20 +329,24 @@ class FaceRecognitionServer:
                 
                 # No match found, assign new ID and save to database
                 else:
-                    # New face, assign new ID
-                    new_face_id = self.next_face_id
-                    self.next_face_id += 1
+                    # # New face, assign new ID
+                    # new_face_id = self.next_face_id
+                    # self.next_face_id += 1
                     
-                    # Save new face encoding
-                    self.known_face_ids.append(new_face_id)
-                    self.known_face_encodings[new_face_id] = final_vector
+                    # # Save new face encoding
+                    # self.known_face_ids.append(new_face_id)
+                    # self.known_face_encodings[new_face_id] = final_vector
                     
-                    # Save to database
-                    self.save_data_to_database(new_face_id, final_vector)
+                    # # Save to database
+                    # self.save_data_to_database(new_face_id, final_vector)
                     
-                    self.logger.info(f"New face assigned ID #{new_face_id}")
+                    # self.logger.info(f"New face assigned ID #{new_face_id}")
                     
-                    return new_face_id
+                    # return new_face_id
+                    
+                    # FOR DEMO: do not add new faces
+                    self.logger.info("Captured face not recognized, but new faces are not added in demo mode")
+                    return None
             
         except Exception as e:
             self.logger.error(f"Face recognition error: {e}")

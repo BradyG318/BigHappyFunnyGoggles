@@ -37,10 +37,7 @@ POSE_QUALITY_THRESHOLD_ID = 0.50
 POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
 SHARPNESS_THRESHOLD = 50.0 
 
-
-
 # Utility functions 
-
 
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
@@ -119,7 +116,7 @@ class FaceCaptureClient:
         self.port = port
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
         self.recent_face_ids: List[Optional[int]] = [None] * 5
-        self.seq_num = 0 #initialize at 0, increment where needed
+        self.seq_num = 0 #initialize at 0, increment after receiving response
         
         # Persistent Socket
         self.sock = None
@@ -193,7 +190,7 @@ class FaceCaptureClient:
                 if not response_len_data:
                     return None
                 
-            response_len = struct.unpack('I', response_len_data)[0]
+            response_len = struct.unpack('<I', response_len_data)[0]
                 
             # Receive the IDPacket payload
             response_payload = self._recv_exactly(response_len)
