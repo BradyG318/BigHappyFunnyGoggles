@@ -15,16 +15,16 @@ class IDPacket:
         self.seq_num = seq_num
         
     def serialize(self):
-        packet_data = struct.pack('?', self.success)
+        packet_data = struct.pack('<?', self.success)
         
         if self.success:
             # Add face ID
-            packet_data += struct.pack('I', self.face_id)
-            packet_data += struct.pack('I', self.seq_num)
+            packet_data += struct.pack('<I', self.face_id)
+            packet_data += struct.pack('<I', self.seq_num)
         
         # Add length prefix
         total_length = len(packet_data)
-        return struct.pack('I', total_length) + packet_data
+        return struct.pack('<I', total_length) + packet_data
     
     @staticmethod
     def deserialize(data):
@@ -35,7 +35,7 @@ class IDPacket:
                 return None
             
             # Read length prefix
-            total_length = struct.unpack('I', data[:4])[0]
+            total_length = struct.unpack('<I', data[:4])[0]
             
             # Verify we have enough data
             if len(data) < 4 + total_length:
@@ -46,7 +46,7 @@ class IDPacket:
             current_pos = 0
             
             # Read success flag
-            success_flag = struct.unpack('?', packet_data[current_pos:current_pos + 1])[0]
+            success_flag = struct.unpack('<?', packet_data[current_pos:current_pos + 1])[0]
             current_pos += 1
             
             if not success_flag:
@@ -54,11 +54,11 @@ class IDPacket:
             
             else:
                 # Read packet data
-                face_id = struct.unpack('I', packet_data[current_pos:current_pos + 4])[0]
+                face_id = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
                 
                 current_pos += 4
                 
-                seq_num = struct.unpack('I', packet_data[current_pos:current_pos + 4])[0]
+                seq_num = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
                 
                 return IDPacket(True, face_id, seq_num)
         
