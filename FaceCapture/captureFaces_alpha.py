@@ -24,7 +24,7 @@ DB_Link.db_link.initialize()
 # os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
 # Camera
-CAMERA_INDEX = 0 #ndi plugin, 7 for glasses on my laptop
+CAMERA_INDEX = 6 #ndi plugin, 7 for glasses on my laptop
 
 # Face Collection Config
 SAMPLES_TO_COLLECT = 30 
