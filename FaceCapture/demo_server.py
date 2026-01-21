@@ -375,8 +375,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Set logging level
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
+    #if args.debug:
+    logging.getLogger().setLevel(logging.DEBUG)
     
     # Create and start server
     server = FaceRecognitionServer(
