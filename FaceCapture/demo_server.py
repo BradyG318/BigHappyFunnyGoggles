@@ -106,7 +106,7 @@ class FaceRecognitionServer:
     def _accept_connection(self, client_socket, client_addr): 
         """Accept incoming TCP connection from glasses"""
         try:
-            client_socket.settimeout(30.0)  # Set socket timeout
+            client_socket.settimeout(60.0)  # Set socket timeout
                         
             # Process packets in loop
             while self.running:
@@ -117,16 +117,21 @@ class FaceRecognitionServer:
                     if not length_data:
                         break  # Connection closed
                     
+                    # Unpack length
                     packet_length = struct.unpack('<I', length_data)[0]
                     
                     # Read the actual packet
                     packet_data = self._recv_exactly(client_socket, packet_length)
+                    
+                    #DEBUG might wanna wait for full packet
                     
                     if not packet_data:
                         break
                     
                     # Process full packet
                     seq_num, response = self._process_packet(length_data + packet_data, client_addr)
+                    
+                    self.logger.debug("DEBUG: seq_num =", seq_num, "response =", response)
                     
                     # Send back response with recognition result
                     self.send_result(client_socket, seq_num, response)
@@ -218,6 +223,9 @@ class FaceRecognitionServer:
             # Convert from Unity's RGB to BGR for OpenCV
             face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
             
+            #DEBUG show image
+            cv2.imshow("Face Crop", face_crop)
+            
             embeddings = DeepFace.represent(
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
@@ -269,77 +277,37 @@ class FaceRecognitionServer:
     
     def recognize_face(self, face_crops, recent_ids):
         """
-        ID Case (num_faces == 1):
-            Creates an embedding for the single face sent
-            Checks it against recent IDs
-        Capture Case (num_faces > 1):
-            Creates averaged representations of faces sent
-            Checks them against recent IDs
-            Checks them against known faces in database
-            Creates new ID if no match found
+        Creates an embedding for the single face sent
+        Checks it against recent IDs
         Returns recognized face ID or None
         """
         try:
             # Check number of faces sent (check ID vs Capture)
             num_faces = len(face_crops)
             
-            if num_faces == 1: #ID Case
-                # Get encoding for single face
-                embedding = self.get_deepface_embedding(face_crops[0])
-                
-                # Check recent IDs first
-                match_id = self.recognize_by_range(embedding, self.known_face_ids)
-                
-                if match_id is not None:
-                    self.logger.info(f"Face recognized as ID #{match_id}")
-                    
-                    return match_id
-                
-                else:
-                    self.logger.info("Face not recognized")
-                    
-                    return None
+            self.logger.debug(f"Recognizing {num_faces} face(s)")
             
-            elif num_faces > 1: #Capture Case
-                # Get encoding for each face
-                embeddings = [None] * num_faces
-                
-                for i, crop in enumerate(face_crops):
-                    embeddings[i] = self.get_deepface_embedding(crop)
-                    
-                # Average and Normalize
-                avg_vector = np.mean(embeddings, axis=0)
-                final_vector = avg_vector / np.linalg.norm(avg_vector)
+            # Get encoding for single face
+            embedding = self.get_deepface_embedding(face_crops[0])
+
+            #DEBUG chew rest of empty list?
             
-                # Check through all known faces (includes recent IDs)
-                match_id = self.recognize_by_range(final_vector, self.known_face_ids)
+            if embedding is None:
+                self.logger.info("No valid embedding generated for face")
+                return None
+            
+            # Check identity against all known faces
+            match_id = self.recognize_by_range(embedding, self.known_face_ids) #DEBUG we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
                 
-                # If match found, send back result
-                if match_id is not None:
-                    self.logger.info(f"Captured face recognized as ID #{match_id}")
+            if match_id is not None:
+                self.logger.info(f"Face recognized as ID #{match_id}")
                     
-                    return match_id
+                return match_id
                 
-                # No match found, assign new ID and save to database
-                else:
-                    # # New face, assign new ID
-                    # new_face_id = self.next_face_id
-                    # self.next_face_id += 1
+            else:
+                self.logger.info("Face not recognized")
                     
-                    # # Save new face encoding
-                    # self.known_face_ids.append(new_face_id)
-                    # self.known_face_encodings[new_face_id] = final_vector
-                    
-                    # # Save to database
-                    # self.save_data_to_database(new_face_id, final_vector)
-                    
-                    # self.logger.info(f"New face assigned ID #{new_face_id}")
-                    
-                    # return new_face_id
-                    
-                    # FOR DEMO: do not add new faces
-                    self.logger.info("Captured face not recognized, but new faces are not added in demo mode")
-                    return None
+                return None
             
         except Exception as e:
             self.logger.error(f"Face recognition error: {e}")
@@ -400,7 +368,7 @@ if __name__ == "__main__":
     #DB_Link.db_link.clear_db() # For testing, clear on startup
     
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
-    parser.add_argument('--host', default='10.111.104.220', help='Host to bind to')
+    parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
     parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
@@ -420,7 +388,7 @@ if __name__ == "__main__":
     server.load_data_from_database()
     
     try:
-        server._start() #_start -> _accept_connection -> _process_packet -> recognize_face
+        server._start() #_start() -> _accept_connection() -> _process_packet() -> recognize_face()
     except KeyboardInterrupt:
         server.logger.info("Server shutdown requested by user")
     except Exception as e:

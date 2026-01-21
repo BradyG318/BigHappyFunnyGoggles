@@ -18,7 +18,7 @@ from IDPacket import IDPacket
 #Client Config 
 
 # Network
-SERVER_HOST = '127.0.0.1' 
+SERVER_HOST = '10.111.104.220' 
 SERVER_PORT = 5000 
 TIMEOUT = 30.0 
 
