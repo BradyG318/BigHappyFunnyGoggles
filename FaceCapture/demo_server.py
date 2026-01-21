@@ -5,6 +5,10 @@ import cv2
 import logging
 import argparse
 import numpy as np
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Suppress TensorFlow logging
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')  # Suppress TensorFlow logging
 from deepface import DeepFace
 
 from FacePacket import FacePacket #receive
