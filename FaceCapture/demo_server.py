@@ -135,7 +135,7 @@ class FaceRecognitionServer:
                     # Process full packet
                     seq_num, response = self._process_packet(length_data + packet_data, client_addr)
                     
-                    self.logger.debug("DEBUG: seq_num =", seq_num, "response =", response)
+                    self.logger.debug("DEBUG: seq_num =", {seq_num}, "response =", {response})
                     
                     # Send back response with recognition result
                     self.send_result(client_socket, seq_num, response)
@@ -230,6 +230,8 @@ class FaceRecognitionServer:
             #DEBUG show image
             cv2.imshow("Face Crop", face_crop)
             
+            cv2.waitKey(1)
+            
             embeddings = DeepFace.represent(
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
@@ -321,12 +323,17 @@ class FaceRecognitionServer:
         try:
             # Create IDPacket based on result
             if result is not None:
-                response_packet = IDPacket(True, result, seq_num)
+                response_packet = IDPacket(True, seq_num, result)
             else:
-                response_packet = IDPacket(False)
+                response_packet = IDPacket(False, seq_num)
             
             response_data = response_packet.serialize()
             
+            # Send the 4-byte length prefix FIRST
+            length_prefix = struct.pack('<I', len(response_data))
+            client_socket.sendall(length_prefix)
+            
+            # Then send the actual packet data
             client_socket.sendall(response_data)
             
             self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")

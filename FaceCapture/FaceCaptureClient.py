@@ -18,8 +18,8 @@ from IDPacket import IDPacket
 #Client Config 
 
 # Network
-SERVER_HOST = '10.111.104.220' 
-SERVER_PORT = 5000 
+SERVER_HOST = '127.0.0.1' 
+SERVER_PORT = 5000
 TIMEOUT = 30.0 
 
 # Camera
@@ -191,9 +191,9 @@ class FaceCaptureClient:
                     return None
                 
             response_len = struct.unpack('<I', response_len_data)[0]
-                
+            
             # Receive the IDPacket payload
-            response_payload = self._recv_exactly(response_len)
+            response_payload = self._recv_exactly(response_len) #accounting for seq num
             if not response_payload: return None
                 
             return IDPacket.deserialize(response_len_data + response_payload)
