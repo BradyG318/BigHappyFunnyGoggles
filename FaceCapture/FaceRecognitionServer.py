@@ -32,7 +32,7 @@ class FaceRecognitionServer:
     currently_tracked_faces = set()
     
     # ~~~ SERVER FUNCTIONS ~~~
-    def __init__(self, host='10.111.104.220', port=5000):
+    def __init__(self, host='127.0.0.1', port=5000):
         """
         TCP Server for receiving face packets
         Args:
@@ -349,9 +349,9 @@ class FaceRecognitionServer:
         try:
             # Create IDPacket based on result
             if result is not None:
-                response_packet = IDPacket(True, result, seq_num)
+                response_packet = IDPacket(True, seq_num, result)
             else:
-                response_packet = IDPacket(False)
+                response_packet = IDPacket(False, seq_num)
             
             response_data = response_packet.serialize()
             
@@ -400,7 +400,7 @@ if __name__ == "__main__":
     #DB_Link.db_link.clear_db() # For testing, clear on startup
     
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
-    parser.add_argument('--host', default='10.111.104.220', help='Host to bind to')
+    parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
     parser.add_argument('--port', type=int, default=5000, help='Port to listen on')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
