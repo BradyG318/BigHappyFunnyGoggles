@@ -264,6 +264,8 @@ class FaceRecognitionServer:
                     best_similarity = similarity
                     best_match_id = face_id
         
+        self.logger.debug(f"Best similarity: {best_similarity} for ID #{best_match_id}")
+        
         # Return best match or None if no match found
         return best_match_id
     

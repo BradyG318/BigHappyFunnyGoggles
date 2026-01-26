@@ -5,7 +5,6 @@ import mediapipe as mp
 import math
 import socket
 import struct
-import time
 import argparse
 from typing import List, Optional, Tuple, Any
 
@@ -114,12 +113,11 @@ class FaceCaptureClient:
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         self.host = host
         self.port = port
-        self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        self.recent_face_ids: List[Optional[int]] = [None] * 5
         self.seq_num = 0 #initialize at 0, increment after receiving response
-        
-        # Persistent Socket
         self.sock = None
+        self.cap = cv2.VideoCapture(CAMERA_INDEX)
+        self.recent_face_ids = [None] * 5
+        
         self._connect_to_server()
         
         # Capture Mode State
@@ -157,7 +155,8 @@ class FaceCaptureClient:
         while len(data) < n:
             try:
                 chunk = self.sock.recv(n - len(data))
-                if not chunk: return None # Connection closed
+                if not chunk:
+                    return None # Connection closed
                 data += chunk
             except socket.timeout:
                 raise socket.timeout("Timed out waiting for full packet.")
@@ -178,7 +177,7 @@ class FaceCaptureClient:
             # Receive IDPacket length (4 bytes)
             response_len_data = self._recv_exactly(4)
                 
-            # Handle connection loss and attempt to reconnect
+            # Handle connection loss and attempt to reconnect TODO: TEST THIS
             if not response_len_data: 
                 # Connection broken, try to reconnect
                 print("[WARN] Connection lost, reconnecting...")
@@ -195,7 +194,10 @@ class FaceCaptureClient:
             # Receive the IDPacket payload
             response_payload = self._recv_exactly(response_len) #accounting for seq num
             if not response_payload: return None
-                
+            
+            # Increment seq num
+            self.seq_num += 1
+            
             return IDPacket.deserialize(response_len_data + response_payload)
                 
         except socket.timeout as e:
@@ -218,18 +220,24 @@ class FaceCaptureClient:
         """Main loop for face detection, quality check, and server communication."""
         
         with mp_face_mesh.FaceMesh(
-            max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5,
-            min_tracking_confidence=0.5) as face_mesh:
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        ) as face_mesh:
 
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
             print("Press 'q' or 'Esc' to quit the application.")
 
             while self.cap.isOpened():
+                # Get frame
                 success, frame = self.cap.read()
                 if not success: continue
 
+                # Process frame for face landmarks
                 frame.flags.writeable = False
-                results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                results = face_mesh.process(rgb)
                 frame.flags.writeable = True
 
                 status = "Searching..."
@@ -240,11 +248,12 @@ class FaceCaptureClient:
                         
                         # Pre-processing and quality checks 
                         raw_face_crop = get_face_crop(frame, face_landmarks)
-                        if raw_face_crop is None: continue 
-
-                        processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                         
-                        sharpness = get_image_sharpness(processed_face_crop)
+                        if raw_face_crop is None: continue
+
+                        #processed_face_crop = conservative_lighting_normalization(raw_face_crop)
+                        
+                        sharpness = get_image_sharpness(raw_face_crop)
                         pose_score = get_pose_quality(face_landmarks)
                         
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD
@@ -253,33 +262,32 @@ class FaceCaptureClient:
                         quality_threshold = POSE_QUALITY_THRESHOLD_CAPTURE if self.is_capturing_new_face else POSE_QUALITY_THRESHOLD_ID
                         is_pose_ok = pose_score >= quality_threshold
 
-                        # Sending data 
-                        
+                        # Sending data
                         if is_sharp_enough and is_pose_ok:
                             
-                            if self.is_capturing_new_face:
+                            if self.is_capturing_new_face: # TODO: REIMPLEMENT THIS PATH
                                 # MODE: CAPTURE (Accumulate and send 10 crops)
                                 
-                                self.capture_crops.append(processed_face_crop)
+                                self.capture_crops.append(raw_face_crop)
                                 
                                 if len(self.capture_crops) >= BEST_SAMPLES_TO_AVERAGE:
                                     # Accumulation complete: Send the final 10-crop packet
                                     
                                     packet = FacePacket(self.seq_num, self.capture_crops, self.recent_face_ids)
                                     response = self._send_packet_and_receive_id(packet)
-                                    
+                                        
                                     if response:
                                         self.seq_num += 1
-                                    
+                                        
                                     # Reset mode immediately after sending the packet
                                     self.is_capturing_new_face = False
                                     self.capture_crops = []
-                                    
+                                        
                                     if response and response.success:
                                         # Enrollment Successful
                                         status = f"Enrollment Complete! ID: {response.face_id}"
                                         color = (0, 255, 0) # Green
-                                        
+                                            
                                     else:
                                         status = "Enrollment Failed (Server Error)"
                                         color = (0, 0, 255) # Red
@@ -290,27 +298,29 @@ class FaceCaptureClient:
 
                             else:
                                 # MODE: IDENTIFICATION (Send 1 crop)
-                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
+                                packet = FacePacket(self.seq_num, [raw_face_crop], self.recent_face_ids)
                                 response = self._send_packet_and_receive_id(packet)
-                                
+                                    
                                 if response:
                                     self.seq_num += 1
-                                
+                                    
                                 if response and response.success and response.face_id:
                                     # KNOWN FACE (Re-ID successful)
                                     face_id = response.face_id
                                     self.recent_face_ids.insert(0, face_id)
                                     self.recent_face_ids = self.recent_face_ids[:5]
-                                    
+                                        
                                     status = f"ID #{face_id} Found"
                                     color = (0, 255, 0) 
                                 else:
                                     # UNKNOWN FACE (Failed Re-ID): Automatically initiate Capture Mode
-                                    self.is_capturing_new_face = True
-                                    self.capture_crops = [processed_face_crop] # Add the first quality crop
-                                    
-                                    status = f"Unknown Face. Starting Capture (1/{BEST_SAMPLES_TO_AVERAGE})"
-                                    color = (255, 255, 0) # Yellow
+                                    # self.is_capturing_new_face = True
+                                    # self.capture_crops = [raw_face_crop] # Add the first quality crop
+                                        
+                                    # status = f"Unknown Face. Starting Capture (1/{BEST_SAMPLES_TO_AVERAGE})"
+                                    # color = (255, 255, 0) # Yellow
+                                    status = "Unknown Face"
+                                    color = (0, 0, 255) # Red
                         else:
                             # Quality check failed
                             status = f"Poor Quality (S:{int(sharpness)} P:{int(pose_score*100)}%)"
@@ -327,9 +337,7 @@ class FaceCaptureClient:
                     break
         
         # Cleanup
-        if self.sock:
-            self.sock.close()
-        
+        if self.sock: self.sock.close()
         self.cap.release()
         cv2.destroyAllWindows()
 

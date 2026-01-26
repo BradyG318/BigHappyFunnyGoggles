@@ -43,8 +43,11 @@ class FacePacket:
                 compressed_crops.append(crop_data)
                 crop_sizes.append(len(crop_data))
         
+        # Build payload
+        payload = b''
+        
         # Pack num faces into payload
-        payload = struct.pack('<B', num_faces)
+        payload += struct.pack('<B', num_faces)
         
         # Add recent face IDs (always 5 IDs, -1 for None)
         for face_id in self.recent_ids[:5]:
@@ -74,16 +77,12 @@ class FacePacket:
     def deserialize(data):
         """Deserializes TCP packet with length prefix"""
         try:
-            # First 4 bytes are total packet length
-            if len(data) < 4:
+            # Verify we have enough data
+            if len(data) < 5:
                 return None
             
             # Read length prefix
             total_length = struct.unpack('<I', data[:4])[0]
-            
-            # Verify we have enough data
-            if len(data) < 4 + total_length:
-                return None
             
             # Skip length prefix
             packet_data = data[4:4 + total_length]

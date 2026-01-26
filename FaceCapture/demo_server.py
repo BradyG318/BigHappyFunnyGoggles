@@ -15,7 +15,7 @@ from FacePacket import FacePacket #receive
 from IDPacket import IDPacket #send
 import DB_Link
 
-# Reworked captureFaces_alpha.py into a TCP server structure
+# Demo version of the Face Recognition Server - id mode only
 
 class FaceRecognitionServer:
     # ~~~ CONSTANTS ~~~
