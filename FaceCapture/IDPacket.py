@@ -24,13 +24,18 @@ class IDPacket:
         # Store length prefix
         total_length = len(packet_data)
         
+        # Create header
+        header = struct.pack('<I', total_length) + struct.pack('<I', self.seq_num)
+        
         # Construct complete packet with header (total length + seq_num)
-        return struct.pack('<I', total_length) + struct.pack('<I', self.seq_num) +packet_data
+        return header + packet_data
     
     @staticmethod
     def deserialize(data):
         """Deserializes IDPacket with length prefix"""
         try:
+            current_pos = 0
+            
             # First 4 bytes are total packet length
             if len(data) < 4:
                 return None
@@ -44,7 +49,6 @@ class IDPacket:
             
             # Skip length prefix
             packet_data = data[4:4 + total_length]
-            current_pos = 0
             
             # Read sequence number
             seq_num = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
