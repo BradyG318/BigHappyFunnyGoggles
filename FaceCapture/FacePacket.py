@@ -47,16 +47,16 @@ class FacePacket:
         payload = b''
         
         # Pack num faces into payload
-        payload += struct.pack('<B', num_faces)
+        payload += struct.pack('>B', num_faces)
         
         # Add recent face IDs (always 5 IDs, -1 for None)
         for face_id in self.recent_ids[:5]:
             id_value = face_id if face_id is not None else -1
-            payload += struct.pack('<i', id_value)  # 'i' for signed int (allows -1 for None)
+            payload += struct.pack('>i', id_value)  # 'i' for signed int (allows -1 for None)
         
         # Add crop sizes for each face
         for crop_size in crop_sizes:
-            payload += struct.pack('<I', crop_size)  # 4 bytes per crop size
+            payload += struct.pack('>I', crop_size)  # 4 bytes per crop size
         
         # Combine with all crops
         for crop_data in compressed_crops:
@@ -66,7 +66,7 @@ class FacePacket:
         total_length = len(payload) + 4 # 4 bytes for sequence number
         
         # Construct header
-        header = struct.pack('<I', total_length) + struct.pack('I', self.seq_num)
+        header = struct.pack('>I', total_length) + struct.pack('>I', self.seq_num)
         
         # Contruct complete packet with header
         complete_packet = header + payload
@@ -82,31 +82,31 @@ class FacePacket:
                 return None
             
             # Read length prefix
-            total_length = struct.unpack('<I', data[:4])[0]
+            total_length = struct.unpack('>I', data[:4])[0]
             
             # Skip length prefix
             packet_data = data[4:4 + total_length]
             current_pos = 0
             
             # Read sequence number
-            seq_num = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
+            seq_num = struct.unpack('>I', packet_data[current_pos:current_pos + 4])[0]
             current_pos += 4
             
             # Read num faces
-            num_faces = struct.unpack('<B', packet_data[current_pos:current_pos + 1])[0]
+            num_faces = struct.unpack('>B', packet_data[current_pos:current_pos + 1])[0]
             current_pos += 1
             
             # Read exactly 5 recent face IDs
             recent_ids = []
             for _ in range(5):
-                face_id = struct.unpack('<i', packet_data[current_pos:current_pos + 4])[0]
+                face_id = struct.unpack('>i', packet_data[current_pos:current_pos + 4])[0]
                 recent_ids.append(face_id if face_id != -1 else None)
                 current_pos += 4
             
             # Read crop sizes
             crop_sizes = []
             for _ in range(num_faces):
-                crop_size = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
+                crop_size = struct.unpack('>I', packet_data[current_pos:current_pos + 4])[0]
                 crop_sizes.append(crop_size)
                 current_pos += 4
             
