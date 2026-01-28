@@ -176,29 +176,31 @@ class FaceCaptureClient:
                 
             # Receive IDPacket length (4 bytes)
             response_len_data = self._recv_exactly(4)
-                
+            
+            clone = response_len_data
+            
             # Handle connection loss and attempt to reconnect TODO: TEST THIS
-            if not response_len_data: 
-                # Connection broken, try to reconnect
-                print("[WARN] Connection lost, reconnecting...")
-                if not self._connect_to_server():
-                    return None
-                # Retry sending the packet
-                self.sock.sendall(serialized_packet)
-                response_len_data = self._recv_exactly(4)
-                if not response_len_data:
-                    return None
+            # if not response_len_data:
+            #     # Connection broken, try to reconnect
+            #     print("[WARN] Connection lost, reconnecting...")
+            #     if not self._connect_to_server():
+            #         return None
+            #     # Retry sending the packet
+            #     self.sock.sendall(serialized_packet)
+            #     response_len_data = self._recv_exactly(4)
+            #     if not response_len_data:
+            #         return None
                 
-            response_len = struct.unpack('<I', response_len_data)[0]
+            response_len = struct.unpack('>I', response_len_data)[0]
             
             # Receive the IDPacket payload
             response_payload = self._recv_exactly(response_len) #accounting for seq num
             if not response_payload: return None
             
             # Increment seq num
-            self.seq_num += 1
+            # self.seq_num += 1
             
-            return IDPacket.deserialize(response_len_data + response_payload)
+            return IDPacket.deserialize(clone + response_payload) #TODO: remove length prefix from deserialize method because this is so fucking stupid
                 
         except socket.timeout as e:
             print(f"[ERROR] Socket timeout: {e}")
@@ -229,6 +231,9 @@ class FaceCaptureClient:
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
             print("Press 'q' or 'Esc' to quit the application.")
 
+            status = "Searching..."
+            color = (255, 0, 0) # Blue (Searching)
+            
             while self.cap.isOpened():
                 # Get frame
                 success, frame = self.cap.read()
@@ -239,9 +244,6 @@ class FaceCaptureClient:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
                 frame.flags.writeable = True
-
-                status = "Searching..."
-                color = (255, 0, 0) # Blue (Searching)
 
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
@@ -304,13 +306,13 @@ class FaceCaptureClient:
                                 if response:
                                     self.seq_num += 1
                                     
-                                if response and response.success and response.face_id:
+                                if response and response.success:
                                     # KNOWN FACE (Re-ID successful)
                                     face_id = response.face_id
                                     self.recent_face_ids.insert(0, face_id)
-                                    self.recent_face_ids = self.recent_face_ids[:5]
+                                    self.recent_face_ids = self.recent_face_ids[:5]  
                                         
-                                    status = f"ID #{face_id} Found"
+                                    status = f"ID #{face_id} Found!"
                                     color = (0, 255, 0) 
                                 else:
                                     # UNKNOWN FACE (Failed Re-ID): Automatically initiate Capture Mode
@@ -319,8 +321,12 @@ class FaceCaptureClient:
                                         
                                     # status = f"Unknown Face. Starting Capture (1/{BEST_SAMPLES_TO_AVERAGE})"
                                     # color = (255, 255, 0) # Yellow
-                                    status = "Unknown Face"
-                                    color = (0, 0, 255) # Red
+                                    
+                                    if status[:2] == "ID":
+                                        continue
+                                    else:
+                                        status = "Unknown Face"
+                                        color = (0, 0, 255) # Red
                         else:
                             # Quality check failed
                             status = f"Poor Quality (S:{int(sharpness)} P:{int(pose_score*100)}%)"

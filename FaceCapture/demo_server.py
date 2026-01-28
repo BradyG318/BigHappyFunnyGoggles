@@ -122,7 +122,7 @@ class FaceRecognitionServer:
                         break  # Connection closed
                     
                     # Unpack length
-                    packet_length = struct.unpack('<I', length_data)[0]
+                    packet_length = struct.unpack('>I', length_data)[0]
                     
                     # Read the actual packet
                     packet_data = self._recv_exactly(client_socket, packet_length)
@@ -225,7 +225,7 @@ class FaceRecognitionServer:
         
         try:
             # Convert from Unity's RGB to BGR for OpenCV
-            face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
+            #face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
             
             #DEBUG show image
             cv2.imshow("Face Crop", face_crop)
@@ -311,7 +311,8 @@ class FaceRecognitionServer:
                 return match_id
                 
             else:
-                self.logger.info("Face not recognized")
+                # TODO: uncomment post demo
+                #self.logger.info("Face not recognized")
                     
                 return None
             
@@ -330,13 +331,13 @@ class FaceRecognitionServer:
             response_data = response_packet.serialize()
             
             # Send the 4-byte length prefix FIRST
-            length_prefix = struct.pack('<I', len(response_data))
+            length_prefix = struct.pack('>I', len(response_data))
             client_socket.sendall(length_prefix)
             
             # Then send the actual packet data
             client_socket.sendall(response_data)
             
-            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
+            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success} face_id={response_packet.face_id}")
             
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")

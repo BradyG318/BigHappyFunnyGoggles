@@ -15,17 +15,17 @@ class IDPacket:
         self.face_id = face_id
         
     def serialize(self):
-        packet_data = struct.pack('<?', self.success)
+        packet_data = struct.pack('>?', self.success)
         
         if self.success:
             # Add face ID
-            packet_data += struct.pack('<I', self.face_id)
+            packet_data += struct.pack('>I', self.face_id)
         
         # Store length prefix
         total_length = len(packet_data)
         
         # Create header
-        header = struct.pack('<I', total_length) + struct.pack('<I', self.seq_num)
+        header = struct.pack('>I', total_length) + struct.pack('>I', self.seq_num)
         
         # Construct complete packet with header (total length + seq_num)
         return header + packet_data
@@ -41,21 +41,22 @@ class IDPacket:
                 return None
             
             # Read length prefix
-            total_length = struct.unpack('<I', data[:4])[0]
+            total_length = struct.unpack('>I', data[:4])[0]
+            current_pos += 4
             
             # Verify we have enough data
             if len(data) < 4 + total_length:
                 return None
             
             # Skip length prefix
-            packet_data = data[4:4 + total_length]
+            packet_data = data[current_pos:current_pos + total_length]
             
             # Read sequence number
-            seq_num = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
+            seq_num = struct.unpack('>I', packet_data[current_pos:current_pos + 4])[0]
             current_pos += 4
             
             # Read success flag
-            success_flag = struct.unpack('<?', packet_data[current_pos:current_pos + 1])[0]
+            success_flag = struct.unpack('>?', packet_data[current_pos:current_pos + 1])[0]
             current_pos += 1
             
             if not success_flag:
@@ -63,7 +64,9 @@ class IDPacket:
             
             else:
                 # Read packet data
-                face_id = struct.unpack('<I', packet_data[current_pos:current_pos + 4])[0]
+                face_id = struct.unpack('>I', packet_data[current_pos:current_pos + 4])[0]
+                
+                print(f"Deserialized IDPacket: seq_num={seq_num}, face_id={face_id}")
                 
                 return IDPacket(True, seq_num, face_id)
         
