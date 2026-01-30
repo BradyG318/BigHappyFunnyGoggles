@@ -236,6 +236,7 @@ class FaceRecognitionServer:
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
                 enforce_detection=False,
+                batch_size = 1,
                 align=True 			    
             )
             
