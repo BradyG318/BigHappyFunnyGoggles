@@ -6,24 +6,24 @@ import math
 import socket
 import struct
 import argparse
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional
 
-warnings.filterwarnings("ignore") 
+warnings.filterwarnings("ignore")
 
 #Packets 
 from FacePacket import FacePacket
-from IDPacket import IDPacket 
+from IDPacket import IDPacket
 
-#Client Config 
+#Client Config
 
 # Network
-SERVER_HOST = '127.0.0.1' 
+SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 5000
-TIMEOUT = 30.0 
+TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 0 
-FPS = 30 
+CAMERA_INDEX = 0
+FPS = 30
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -34,7 +34,7 @@ mp_face_mesh = mp.solutions.face_mesh
 # Pose/Quality Thresholds
 POSE_QUALITY_THRESHOLD_ID = 0.50
 POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
-SHARPNESS_THRESHOLD = 50.0 
+SHARPNESS_THRESHOLD = 50.0
 
 # Utility functions 
 
@@ -197,9 +197,6 @@ class FaceCaptureClient:
             response_payload = self._recv_exactly(response_len) #accounting for seq num
             if not response_payload: return None
             
-            # Increment seq num
-            # self.seq_num += 1
-            
             return IDPacket.deserialize(clone + response_payload) #TODO: remove length prefix from deserialize method because this is so fucking stupid
                 
         except socket.timeout as e:
@@ -253,9 +250,9 @@ class FaceCaptureClient:
                         
                         if raw_face_crop is None: continue
 
-                        #processed_face_crop = conservative_lighting_normalization(raw_face_crop)
+                        processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                         
-                        sharpness = get_image_sharpness(raw_face_crop)
+                        sharpness = get_image_sharpness(processed_face_crop)
                         pose_score = get_pose_quality(face_landmarks)
                         
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD
@@ -300,7 +297,7 @@ class FaceCaptureClient:
 
                             else:
                                 # MODE: IDENTIFICATION (Send 1 crop)
-                                packet = FacePacket(self.seq_num, [raw_face_crop], self.recent_face_ids)
+                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
                                 response = self._send_packet_and_receive_id(packet)
                                     
                                 if response:
