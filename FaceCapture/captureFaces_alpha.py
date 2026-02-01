@@ -24,7 +24,7 @@ DB_Link.db_link.initialize()
 # os.makedirs(LOCAL_DB_FOLDER, exist_ok=True)
 
 # Camera
-CAMERA_INDEX = 6 #ndi plugin, 7 for glasses on my laptop
+CAMERA_INDEX = 0 #ndi plugin, 7 for glasses on my laptop
 
 # Face Collection Config
 SAMPLES_TO_COLLECT = 30 
@@ -342,6 +342,8 @@ with mp_face_mesh.FaceMesh(
         # Use detection frame for Mediapipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
+
+        frame.flags.writeable = True
 
         # Reset data structures for tracking current detection info
         current_frame_data = []
