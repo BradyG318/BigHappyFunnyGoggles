@@ -17,8 +17,8 @@ from IDPacket import IDPacket
 #Client Config
 
 # Network
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 5000
+SERVER_HOST = '76.28.113.73'
+SERVER_PORT = 33060
 TIMEOUT = 30.0
 
 # Camera
@@ -285,8 +285,13 @@ class FaceCaptureClient:
                                     self.capture_crops = []
                                         
                                     if response and response.success:
-                                        # Enrollment Successful
-                                        status = f"Enrollment Complete! ID: {response.face_id}"
+                                        # Successful Identification
+                                        if response.face_id == 1: name = "Andrew"
+                                        elif response.face_id == 4: name = "Jacob"
+                                        elif response.face_id == 7: name = "Brady"
+                                        elif response.face_id == 8: name = "Aislin"
+                                            
+                                        status = f"ID: {response.face_id} Name: {name}"
                                         color = (0, 255, 0) # Green
                                             
                                     else:
@@ -311,7 +316,13 @@ class FaceCaptureClient:
                                     self.recent_face_ids.insert(0, face_id)
                                     self.recent_face_ids = self.recent_face_ids[:5]  
                                         
-                                    status = f"ID #{face_id} Found!"
+                                    # Successful Identification
+                                    if response.face_id == 1: name = "Andrew"
+                                    elif response.face_id == 4: name = "Jacob"
+                                    elif response.face_id == 7: name = "Brady"
+                                    elif response.face_id == 8: name = "Aislin"
+                                            
+                                    status = f"ID: {response.face_id} Name: {name}"
                                     color = (0, 255, 0) 
                                 else:
                                     # UNKNOWN FACE (Failed Re-ID): Automatically initiate Capture Mode
