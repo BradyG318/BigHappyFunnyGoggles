@@ -70,6 +70,15 @@ class DB_Link:
             print(f"Error saving vector to database: {e}")
             return False
     
+    async def delete_entry_async(self, id: int) -> bool:
+        """Delete a face entry by ID"""
+        try:
+            await self.conn.execute('DELETE FROM faces WHERE id = $1', id)
+            return True
+        except Exception as e:
+            print(f"Error deleting entry from database: {e}")
+            return False
+    
     async def clear_db_async(self) -> bool:
         """Clear all entries in the faces table"""
         try:
@@ -123,6 +132,11 @@ class DB_Link:
         """Synchronous wrapper to clear database"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.clear_db_async())
+
+    def delete_entry(self, id: int) -> bool:
+        """Synchronous wrapper to delete entry by id"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.delete_entry_async(id))
 
     def get_face_image(self, id: int):
         """Synchronous wrapper to get image data by id"""
