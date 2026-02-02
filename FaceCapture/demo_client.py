@@ -7,6 +7,7 @@ import socket
 import struct
 import argparse
 from typing import List, Optional
+import time
 
 warnings.filterwarnings("ignore")
 
@@ -117,6 +118,9 @@ class FaceCaptureClient:
         self.sock = None
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
         self.recent_face_ids = [None] * 5
+        
+        self.last_send_time = 0.0
+        self.SEND_INTERVAL = 0.1 # Send at most 10 packets per second
         
         self._connect_to_server()
         
@@ -304,7 +308,16 @@ class FaceCaptureClient:
 
                             else:
                                 # MODE: RE-ID (Send 1 crop)
-                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
+                                current_time = time.time()
+                                if current_time - self.last_send_time < self.SEND_INTERVAL:
+                                    # Draw bounding box and status
+                                    cv2.rectangle(frame, (border[0], border[1]), (border[2], border[3]), color, 2) #left, top, right, bottom
+                                    cv2.putText(frame, status, (border[0], border[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                                    
+                                    continue  # Skip sending to maintain rate limit
+                                self.last_send_time = current_time
+                                
+                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)                                
                                 response = self._send_packet_and_receive_id(packet)
                                     
                                 if response:
@@ -338,6 +351,9 @@ class FaceCaptureClient:
                                         status = "Unknown Face"
                                         color = (0, 0, 255) # Red
                         else:
+                            if status[:2] == "ID":
+                                continue
+                            
                             # Quality check failed
                             status = f"Poor Quality (S:{int(sharpness)} P:{int(pose_score*100)}%)"
                             color = (100, 100, 100) # Grey
