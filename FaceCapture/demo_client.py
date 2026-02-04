@@ -247,7 +247,7 @@ class FaceCaptureClient:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
                 frame.flags.writeable = True
-
+                
                 # Handle detected faces
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
@@ -291,12 +291,12 @@ class FaceCaptureClient:
                                         
                                     if response and response.success:
                                         # Successful Identification
-                                        if response.face_id == 1 or response.face_id == 13: name = "Andrew"
-                                        elif response.face_id == 4 or response.face_id == 11: name = "Jacob"
-                                        elif response.face_id == 7 or response.face_id == 15: name = "Brady"
-                                        elif response.face_id == 8 or response.face_id == 9: name = "Aislin"
+                                        #if response.face_id == 1 or response.face_id == 13: name = "Andrew"
+                                        #elif response.face_id == 4 or response.face_id == 11: name = "Jacob"
+                                        #elif response.face_id == 7 or response.face_id == 15: name = "Brady"
+                                        #elif response.face_id == 8 or response.face_id == 9: name = "Aislin"
                                             
-                                        status = f"ID: {response.face_id} Name: {name}"
+                                        status = f"ID: {response.face_id}"  #Name: {name}"
                                         color = (0, 255, 0) # Green
                                             
                                     else:
@@ -331,12 +331,12 @@ class FaceCaptureClient:
                                     self.recent_face_ids = self.recent_face_ids[:5]  
                                         
                                     # Successful Identification
-                                    if response.face_id == 1: name = "Andrew"
-                                    elif response.face_id == 4: name = "Jacob"
-                                    elif response.face_id == 7: name = "Brady"
-                                    elif response.face_id == 8: name = "Aislin"
+                                    # if response.face_id == 1: name = "Andrew"
+                                    # elif response.face_id == 4: name = "Jacob"
+                                    # elif response.face_id == 7: name = "Brady"
+                                    # elif response.face_id == 8: name = "Aislin"
                                             
-                                    status = f"ID: {response.face_id} Name: {name}"
+                                    status = f"ID: {response.face_id}" # Name: {name}"
                                     color = (0, 255, 0) 
                                 else:
                                     # UNKNOWN FACE (Failed Re-ID): Automatically initiate Capture Mode
