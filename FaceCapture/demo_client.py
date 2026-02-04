@@ -18,12 +18,12 @@ from IDPacket import IDPacket
 #Client Config
 
 # Network
-SERVER_HOST = '76.28.113.73'
-SERVER_PORT = 33060
+SERVER_HOST = '76.28.113.73'#'127.0.0.1'        
+SERVER_PORT =  33060                        #5000
 TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 0
+CAMERA_INDEX = 1
 FPS = 30
 
 # Face Collection Config (Used for Capture Mode)
@@ -76,13 +76,14 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
         l_channel = lab[:,:,0]
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
+        shadow_area = np.percentile(face_crop, 10) # Checking the shaows passed by the glasses 
         
-        if mean_brightness > 200 and std_brightness < 40:
+        if mean_brightness > 200 and std_brightness < 40: #this is for too bright so dont mess with this 
             gamma = 1.3; inv_gamma = 1.0 / gamma
             table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
             return cv2.LUT(face_crop, table)
-        elif mean_brightness < 40:
-            alpha = 1.2; beta = 30
+        elif mean_brightness < 60 or shadow_area < 35: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+            alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
             return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
         else:
             return face_crop
