@@ -23,7 +23,7 @@ SERVER_PORT =  33060                        #5000
 TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 1
+CAMERA_INDEX = 6
 FPS = 30
 
 # Face Collection Config (Used for Capture Mode)
@@ -291,10 +291,10 @@ class FaceCaptureClient:
                                         
                                     if response and response.success:
                                         # Successful Identification
-                                        if response.face_id == 1: name = "Andrew"
-                                        elif response.face_id == 4: name = "Jacob"
-                                        elif response.face_id == 7: name = "Brady"
-                                        elif response.face_id == 8: name = "Aislin"
+                                        if response.face_id == 1 or response.face_id == 13: name = "Andrew"
+                                        elif response.face_id == 4 or response.face_id == 11: name = "Jacob"
+                                        elif response.face_id == 7 or response.face_id == 15: name = "Brady"
+                                        elif response.face_id == 8 or response.face_id == 9: name = "Aislin"
                                             
                                         status = f"ID: {response.face_id} Name: {name}"
                                         color = (0, 255, 0) # Green
