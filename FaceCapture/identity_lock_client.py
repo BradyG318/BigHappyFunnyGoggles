@@ -79,7 +79,7 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
         l_channel = lab[:,:,0]
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
-        shadow_area = np.percentile(face_crop, 10) # Checking the shaows passed by the glasses 
+        shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
         
         if mean_brightness > 200 and std_brightness < 40: #this is for too bright so dont mess with this 
             gamma = 1.3; inv_gamma = 1.0 / gamma
