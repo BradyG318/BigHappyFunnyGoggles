@@ -16,7 +16,9 @@ UnityTestProjectDump/TestProject/.vscode/
 GlobalSupressions.cs
 
 # Virtual environment
-mp_env/
+server_env/
+client_env/
+scanner_env/
 
 # Python cache
 __pycache__/
@@ -26,3 +28,5 @@ __pycache__/
 
 # Graveyard
 Graveyard/
+
+Temp/
