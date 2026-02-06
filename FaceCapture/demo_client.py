@@ -11,20 +11,19 @@ import time
 
 warnings.filterwarnings("ignore")
 
-#Packets 
+# Packets 
 from FacePacket import FacePacket
 from IDPacket import IDPacket
 
 #Client Config
 
 # Network
-SERVER_HOST = '76.28.113.73'#'127.0.0.1'        
-SERVER_PORT =  33060                        #5000
+SERVER_HOST = '76.28.113.73' #'127.0.0.1'        
+SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 6
-FPS = 30
+CAMERA_INDEX = 0
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -115,22 +114,23 @@ class FaceCaptureClient:
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         self.host = host
         self.port = port
-        self.seq_num = 0 #initialize at 0, increment after receiving response
         self.sock = None
+        
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        self.recent_face_ids = [None] * 5
+        if not self.cap.isOpened():
+            raise IOError(f"Error: Could not open camera {CAMERA_INDEX}")
         
         self.last_send_time = 0.0
         self.SEND_INTERVAL = 0.1 # Send at most 10 packets per second
         
-        self._connect_to_server()
+        self.seq_num = 0 #initialize at 0, increment after receiving response
+        self.recent_face_ids = [None] * 5 # Last 5 recognized face IDs for context
         
         # ID Mode State
         self.is_new_id = False
         self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
         
-        if not self.cap.isOpened():
-            raise IOError(f"Error: Could not open camera {CAMERA_INDEX}")
+        self._connect_to_server()
         
     # Networking functions 
 
@@ -234,6 +234,7 @@ class FaceCaptureClient:
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
             print("Press 'q' or 'Esc' to quit the application.")
 
+            # Default status
             status = "Searching..."
             color = (255, 0, 0) # Blue (Searching)
             
@@ -241,6 +242,11 @@ class FaceCaptureClient:
                 # Get frame
                 success, frame = self.cap.read()
                 if not success: continue
+                
+                # Store 'current' tracked boxes of last frame before resetting local tracking for next frame
+                if current_tracks: # Skip first iteration where current_tracks is undefined
+                    self.tracker.update_current_boxes(current_tracks)
+                current_tracks = {}
 
                 # Process frame for face landmarks
                 frame.flags.writeable = False
@@ -256,7 +262,7 @@ class FaceCaptureClient:
                         raw_face_crop, border = get_face_crop(frame, face_landmarks)
                         
                         if raw_face_crop is None: continue
-
+                        
                         processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                         
                         sharpness = get_image_sharpness(processed_face_crop)
@@ -309,6 +315,8 @@ class FaceCaptureClient:
 
                             else:
                                 # MODE: RE-ID (Send 1 crop)
+                                
+                                # Rate limiting
                                 current_time = time.time()
                                 if current_time - self.last_send_time < self.SEND_INTERVAL:
                                     # Draw bounding box and status
@@ -322,7 +330,7 @@ class FaceCaptureClient:
                                 response = self._send_packet_and_receive_id(packet)
                                     
                                 if response:
-                                    self.seq_num += 1
+                                    self.seq_num += 1 # Recognize successful response
                                     
                                 if response and response.success:
                                     # KNOWN FACE (Re-ID successful)
