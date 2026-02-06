@@ -7,23 +7,27 @@ import socket
 import struct
 import argparse
 from typing import List, Optional
+import time
+import traceback
 
 warnings.filterwarnings("ignore")
 
-#Packets 
+# Packets 
 from FacePacket import FacePacket
 from IDPacket import IDPacket
+
+# Detection Tracker
+from face_tracker import SimpleFaceTracker
 
 #Client Config
 
 # Network
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT = 5000
+SERVER_HOST = '76.28.113.73' #'127.0.0.1'        
+SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
 # Camera
 CAMERA_INDEX = 0
-FPS = 30
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -32,8 +36,8 @@ BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
 mp_face_mesh = mp.solutions.face_mesh
 
 # Pose/Quality Thresholds
-POSE_QUALITY_THRESHOLD_ID = 0.50
-POSE_QUALITY_THRESHOLD_CAPTURE = 0.89
+POSE_QUALITY_THRESHOLD_RE_ID = 0.50
+POSE_QUALITY_THRESHOLD_ID = 0.89
 SHARPNESS_THRESHOLD = 50.0
 
 # Utility functions 
@@ -75,20 +79,21 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
         l_channel = lab[:,:,0]
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
+        shadow_area = np.percentile(face_crop, 10) # Checking the shaows passed by the glasses 
         
-        if mean_brightness > 200 and std_brightness < 40:
+        if mean_brightness > 200 and std_brightness < 40: #this is for too bright so dont mess with this 
             gamma = 1.3; inv_gamma = 1.0 / gamma
             table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
             return cv2.LUT(face_crop, table)
-        elif mean_brightness < 40:
-            alpha = 1.2; beta = 30
+        elif mean_brightness < 60 or shadow_area < 35: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+            alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
             return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
         else:
             return face_crop
     except Exception:
         return face_crop
 
-def get_face_crop(frame: np.ndarray, face_landmarks) -> Optional[np.ndarray]:
+def get_face_crop(frame: np.ndarray, face_landmarks):
     """Extracts and crops the face from the frame based on landmarks and padding."""
     h, w = frame.shape[:2]
     x_coords = [lm.x * w for lm in face_landmarks.landmark]
@@ -103,7 +108,7 @@ def get_face_crop(frame: np.ndarray, face_landmarks) -> Optional[np.ndarray]:
 
     if right - left < 60 or bottom - top < 60: return None
     
-    return frame[top:bottom, left:right]
+    return frame[top:bottom, left:right], [left, top, right, bottom]
 
 class FaceCaptureClient:
     """
@@ -113,19 +118,26 @@ class FaceCaptureClient:
     def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         self.host = host
         self.port = port
-        self.seq_num = 0 #initialize at 0, increment after receiving response
         self.sock = None
+        
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        self.recent_face_ids = [None] * 5
-        
-        self._connect_to_server()
-        
-        # Capture Mode State
-        self.is_capturing_new_face = False
-        self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
-        
         if not self.cap.isOpened():
             raise IOError(f"Error: Could not open camera {CAMERA_INDEX}")
+        
+        self.last_send_time = 0.0
+        self.SEND_INTERVAL = 0.1 # Send at most 10 packets per second
+        
+        self.seq_num = 0 #initialize at 0, increment after receiving response
+        self.recent_face_ids = [None] * 5 # Last 5 recognized face IDs for context
+        
+        # ID Mode State
+        self.is_new_id = False
+        self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
+        
+        self.tracker = SimpleFaceTracker(iou_threshold=0.3, max_frames_missed=5)
+        self.track_id_to_data = {}  # track_id -> face_id
+        
+        self._connect_to_server()
         
     # Networking functions 
 
@@ -219,15 +231,17 @@ class FaceCaptureClient:
         """Main loop for face detection, quality check, and server communication."""
         
         with mp_face_mesh.FaceMesh(
-            max_num_faces=1,
+            max_num_faces=2,
             refine_landmarks=True,
+            static_image_mode=False,
             min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.3
         ) as face_mesh:
 
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
             print("Press 'q' or 'Esc' to quit the application.")
 
+            # Default status
             status = "Searching..."
             color = (255, 0, 0) # Blue (Searching)
             
@@ -235,21 +249,26 @@ class FaceCaptureClient:
                 # Get frame
                 success, frame = self.cap.read()
                 if not success: continue
+                
+                # Initialize current frame data lists
+                current_frame_boxes = []
+                face_crops_for_boxes = []
 
                 # Process frame for face landmarks
                 frame.flags.writeable = False
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
                 frame.flags.writeable = True
-
+                
+                # Handle detected faces
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
-                        
                         # Pre-processing and quality checks 
-                        raw_face_crop = get_face_crop(frame, face_landmarks)
+                        raw_face_crop, border = get_face_crop(frame, face_landmarks)
+                        track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
                         
                         if raw_face_crop is None: continue
-
+                        
                         processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                         
                         sharpness = get_image_sharpness(processed_face_crop)
@@ -257,81 +276,77 @@ class FaceCaptureClient:
                         
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD
                         
-                        # Use tighter threshold for capture, looser for ID
-                        quality_threshold = POSE_QUALITY_THRESHOLD_CAPTURE if self.is_capturing_new_face else POSE_QUALITY_THRESHOLD_ID
+                        # Use tighter threshold for ID, looser for re-ID
+                        quality_threshold = POSE_QUALITY_THRESHOLD_ID if self.is_new_id else POSE_QUALITY_THRESHOLD_RE_ID
                         is_pose_ok = pose_score >= quality_threshold
-
-                        # Sending data
-                        if is_sharp_enough and is_pose_ok:
-                            
-                            if self.is_capturing_new_face: # TODO: REIMPLEMENT THIS PATH
-                                # MODE: CAPTURE (Accumulate and send 10 crops)
-                                
-                                self.capture_crops.append(raw_face_crop)
-                                
-                                if len(self.capture_crops) >= BEST_SAMPLES_TO_AVERAGE:
-                                    # Accumulation complete: Send the final 10-crop packet
-                                    
-                                    packet = FacePacket(self.seq_num, self.capture_crops, self.recent_face_ids)
-                                    response = self._send_packet_and_receive_id(packet)
-                                        
-                                    if response:
-                                        self.seq_num += 1
-                                        
-                                    # Reset mode immediately after sending the packet
-                                    self.is_capturing_new_face = False
-                                    self.capture_crops = []
-                                        
-                                    if response and response.success:
-                                        # Enrollment Successful
-                                        status = f"Enrollment Complete! ID: {response.face_id}"
-                                        color = (0, 255, 0) # Green
-                                            
-                                    else:
-                                        status = "Enrollment Failed (Server Error)"
-                                        color = (0, 0, 255) # Red
-
-                                else:
-                                    status = f"CAPTURING... {len(self.capture_crops)}/{BEST_SAMPLES_TO_AVERAGE}"
-                                    color = (255, 165, 0) # Orange
-
-                            else:
-                                # MODE: IDENTIFICATION (Send 1 crop)
-                                packet = FacePacket(self.seq_num, [processed_face_crop], self.recent_face_ids)
-                                response = self._send_packet_and_receive_id(packet)
-                                    
-                                if response:
-                                    self.seq_num += 1
-                                    
-                                if response and response.success:
-                                    # KNOWN FACE (Re-ID successful)
-                                    face_id = response.face_id
-                                    self.recent_face_ids.insert(0, face_id)
-                                    self.recent_face_ids = self.recent_face_ids[:5]  
-                                        
-                                    status = f"ID #{face_id} Found!"
-                                    color = (0, 255, 0) 
-                                else:
-                                    # UNKNOWN FACE (Failed Re-ID): Automatically initiate Capture Mode
-                                    # self.is_capturing_new_face = True
-                                    # self.capture_crops = [raw_face_crop] # Add the first quality crop
-                                        
-                                    # status = f"Unknown Face. Starting Capture (1/{BEST_SAMPLES_TO_AVERAGE})"
-                                    # color = (255, 255, 0) # Yellow
-                                    
-                                    if status[:2] == "ID":
-                                        continue
-                                    else:
-                                        status = "Unknown Face"
-                                        color = (0, 0, 255) # Red
-                        else:
-                            # Quality check failed
-                            status = f"Poor Quality (S:{int(sharpness)} P:{int(pose_score*100)}%)"
-                            color = (100, 100, 100) # Grey
                         
-                # Drawing the frame 
-                cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                
+                        if is_sharp_enough and is_pose_ok:
+                            # Store for tracking
+                            if raw_face_crop is not None:
+                                current_frame_boxes.append(track_box)
+                                face_crops_for_boxes.append(processed_face_crop)
+                        else:
+                            # if status[:2] == "ID":
+                            #     continue
+                            
+                            # # Quality check failed
+                            # status = f"Poor Quality (S:{int(sharpness)} P:{int(pose_score*100)}%)"
+                            # color = (100, 100, 100) # Grey
+                            continue #TODO: reimplement UI for poor quality
+
+                    # Update tracker: get persistent track_ids for this frame's boxes
+                    tracker_results = self.tracker.update(current_frame_boxes)
+                    
+                    # Process each tracked face
+                    for track_id, current_box in tracker_results.items():
+                        # Find which crop index corresponds to this box
+                        try:
+                            box_index = current_frame_boxes.index(current_box)
+                            current_crop = face_crops_for_boxes[box_index]
+                        except ValueError:
+                            continue # Box not found, skip
+                        
+                        track_data = {} # initialize empty
+                        
+                        # Check if this track_id already has a server-assigned face_id
+                        if track_id in self.track_id_to_data:
+                            track_data = self.track_id_to_data[track_id]
+                            if track_data.get('server_id'):  # Already recognized
+                                display_id = track_data['server_id']
+                                status = f"ID #{display_id}"
+                                
+                                # Draw box with this ID
+                                status = f"ID: #{display_id}"
+                                color = (0, 255, 0) # Green
+                            
+                                # Draw bounding box and status
+                                cv2.rectangle(frame, (current_box[0], current_box[1]), (current_box[2], current_box[3]), color, 2) #left, top, right, bottom
+                                cv2.putText(frame, status, (current_box[0], current_box[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                                continue  # Skip server query for this face
+
+                        # If unknown, check if a request is pending for this track
+                        if track_data != -1 and track_data.get('pending_seq_num'):
+                            status = f"Verifying Track {track_id}..."
+                        else:
+                            # Send to server, get seq_num
+                            packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
+                            response = self._send_packet_and_receive_id(packet)
+
+                            if response:
+                                # Update your maps
+                                if response.success:
+                                    self.track_id_to_data[track_id] = {
+                                        'server_id': response.face_id,
+                                        'pending_seq_num': None
+                                    }
+                                else:
+                                    self.track_id_to_data[track_id] = {
+                                        'server_id': None,
+                                        'pending_seq_num': self.seq_num  # Mark as pending
+                                    }
+                                self.seq_num += 1
+                        
+                # Drawing the frame                
                 cv2.imshow('Face Capture Client (Glasses)', frame)
                 
                 # Handle keyboard inputs (only for quitting)
@@ -359,3 +374,4 @@ if __name__ == "__main__":
         print(f"Failed to start client: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+        print(traceback.format_exc())
