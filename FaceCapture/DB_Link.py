@@ -6,7 +6,7 @@ import asyncio
 
 load_dotenv()
 
-class DB_Link:
+class db_link:
     def __init__(self):
         self.connection_pool = None
         self.event_loop = None
@@ -144,4 +144,4 @@ class DB_Link:
         return loop.run_until_complete(self.get_face_image_async())
 
 # Global database handler instance
-db_link = DB_Link()
+db_link = db_link()

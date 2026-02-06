@@ -13,7 +13,7 @@ from deepface import DeepFace
 
 from FacePacket import FacePacket #receive
 from IDPacket import IDPacket #send
-import DB_Link
+import db_link
 
 # Demo version of the Face Recognition Server - id mode only
 
@@ -346,7 +346,7 @@ class FaceRecognitionServer:
     def load_data_from_database(self):
         # Load existing vectors from database
         try:            
-            vectors_dict = DB_Link.db_link.get_all_vectors()
+            vectors_dict = db_link.db_link.get_all_vectors()
             for face_id_str, vector_list in vectors_dict.items():
                 face_id = int(face_id_str) # Convert string key to int
                 self.known_face_ids.append(face_id)
@@ -363,7 +363,7 @@ class FaceRecognitionServer:
         Saves the vector to PostgreSQL database.
         """
         # Save the final vector to database synchronously
-        success = DB_Link.db_link.save_face_vector(face_id, encoding.tolist())
+        success = db_link.db_link.save_face_vector(face_id, encoding.tolist())
     
         if not success:
             self.logger.error(f"!!! ERROR saving vector to database for face #{face_id}")
@@ -377,8 +377,8 @@ class FaceRecognitionServer:
 if __name__ == "__main__":    
     # --- CONFIGURATION ---
     # Database initialization
-    DB_Link.db_link.initialize()
-    #DB_Link.db_link.clear_db() # For testing, clear on startup
+    db_link.db_link.initialize()
+    #db_link.db_link.clear_db() # For testing, clear on startup
     
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')

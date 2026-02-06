@@ -7,16 +7,18 @@ from deepface import DeepFace
 import math
 
 # For database storage
-import DB_Link
+import db_link
 
 # For local storage
 # import os
 # import json
 
+# FORMERLY NAMED captureFaces_alpha.py
+
 # --- CONFIGURATION ---
 # Database storage
-DB_Link.db_link.initialize()
-#DB_Link.db_link.clear_db()
+db_link.db_link.initialize()
+#db_link.db_link.clear_db()
 
 # Local storage
 # LOCAL_DB_FOLDER = "rm_db"
@@ -224,7 +226,7 @@ def save_data_to_database(face_id, encoding):
     print(f"\n--- DATABASE SAVE START: Face ID #{face_id} ---")
 
     # Save the final vector to database synchronously
-    success = DB_Link.db_link.save_face_vector(face_id, encoding.tolist())
+    success = db_link.db_link.save_face_vector(face_id, encoding.tolist())
     
     if not success:
         print(f"!!! ERROR saving vector to database for face #{face_id}")
@@ -274,7 +276,7 @@ def finalize_face_vector(temp_face_id):
 # --- MAIN ---
 # Load existing vectors from database
 try:
-    vectors_dict = DB_Link.db_link.get_all_vectors()
+    vectors_dict = db_link.db_link.get_all_vectors()
     for face_id_str, vector_list in vectors_dict.items():
         face_id = int(face_id_str)
         known_face_ids.append(face_id)
