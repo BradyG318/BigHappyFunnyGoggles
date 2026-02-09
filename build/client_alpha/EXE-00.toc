@@ -101,7 +101,7 @@
  [],
  False,
  False,
- 1770664911,
+ 1770665022,
  [('run.exe',
    'c:\\Users\\obx31\\Desktop\\QU '
    'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
