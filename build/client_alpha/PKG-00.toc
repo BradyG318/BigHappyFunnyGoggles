@@ -1,0 +1,48 @@
+('C:\\Users\\obx31\\Desktop\\QU '
+ 'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\client_alpha.pkg',
+ {'BINARY': True,
+  'DATA': True,
+  'EXECUTABLE': True,
+  'EXTENSION': True,
+  'PYMODULE': True,
+  'PYSOURCE': True,
+  'PYZ': False,
+  'SPLASH': True},
+ [('PYZ-00.pyz',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\PYZ-00.pyz',
+   'PYZ'),
+  ('struct',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\struct.pyc',
+   'PYMODULE'),
+  ('pyimod01_archive',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\pyimod01_archive.pyc',
+   'PYMODULE'),
+  ('pyimod02_importers',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\pyimod02_importers.pyc',
+   'PYMODULE'),
+  ('pyimod03_ctypes',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\pyimod03_ctypes.pyc',
+   'PYMODULE'),
+  ('pyimod04_pywin32',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\pyimod04_pywin32.pyc',
+   'PYMODULE'),
+  ('pyiboot01_bootstrap',
+   'c:\\users\\obx31\\appdata\\local\\programs\\python\\python37\\lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('client_alpha',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\client_alpha.py',
+   'PYSOURCE')],
+ True,
+ False,
+ False,
+ [],
+ None,
+ None,
+ None)
