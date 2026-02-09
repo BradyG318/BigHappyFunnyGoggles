@@ -7,8 +7,10 @@
   'PYMODULE': True,
   'PYSOURCE': True,
   'PYZ': False,
-  'SPLASH': True},
- [('PYZ-00.pyz',
+  'SPLASH': True,
+  'SYMLINK': False},
+ [('pyi-contents-directory _internal', '', 'OPTION'),
+  ('PYZ-00.pyz',
    'C:\\Users\\obx31\\Desktop\\QU '
    'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\PYZ-00.pyz',
    'PYZ'),
@@ -33,12 +35,46 @@
    'Stuff\\Capstone\\BigHappyFunnyGoggles\\build\\client_alpha\\localpycs\\pyimod04_pywin32.pyc',
    'PYMODULE'),
   ('pyiboot01_bootstrap',
-   'c:\\users\\obx31\\appdata\\local\\programs\\python\\python37\\lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'c:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('pyi_rth_inspect',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
+   'PYSOURCE'),
+  ('pyi_rth_tensorflow',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks\\pyi_rth_tensorflow.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgres',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgres.py',
+   'PYSOURCE'),
+  ('pyi_rth__tkinter',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth__tkinter.py',
+   'PYSOURCE'),
+  ('pyi_rth_mplconfig',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_mplconfig.py',
+   'PYSOURCE'),
+  ('pyi_rth_setuptools',
+   'C:\\Users\\obx31\\Desktop\\QU '
+   'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
    'PYSOURCE'),
   ('client_alpha',
    'C:\\Users\\obx31\\Desktop\\QU '
    'Stuff\\Capstone\\BigHappyFunnyGoggles\\FaceCapture\\client_alpha.py',
    'PYSOURCE')],
+ 'python311.dll',
  True,
  False,
  False,
