@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from typing import List, Tuple, Dict, Optional
 
@@ -8,11 +9,19 @@ class Track:
         self.track_id = track_id
         self.current_box = initial_box
         self.missed_count = 0
-        # Store a simple appearance histogram here if needed
+        self.last_seen_time = time.time()
+        
+        # Recognition fields
+        self.server_id = None # Recognized face ID from server, if any
+        self.pending_seq_num = None # Current pending sequence number for recognition request, if any
+        self.last_recognition_time = 0 # Last tried to recognize track
+        self.recognition_cooldown = 0 # When we can try again
+        self.failed_attempts = 0 # Count of failed recognition attempts
 
     def update(self, new_box: Tuple):
         self.current_box = new_box
         self.missed_count = 0  # Reset on successful match
+        self.last_seen_time = time.time()
 
     def mark_missed(self):
         self.missed_count += 1
@@ -21,14 +30,16 @@ class SimpleFaceTracker:
     """
     A lightweight IOU-based tracker that assigns persistent IDs to face_mesh tracking
     """
-    def __init__(self, iou_threshold, max_frames_missed):
+    def __init__(self, iou_threshold, max_frames_missed, max_age_seconds):
         """
         Args:
             iou_threshold: Minimum IOU to consider boxes a match. Tune: (0.2 - 0.5)
             max_frames_missed: Frames to keep a 'stale' track alive before deleting it.
+            max_age_seconds: Seconds to keep a track alive before deleting it.
         """
         self.iou_thresh = iou_threshold
         self.max_missed = max_frames_missed
+        self.max_age_seconds = max_age_seconds
         self.next_track_id = 0
         self.active_tracks: Dict[int, Track] = {}  # track_id -> Track object
 
@@ -52,6 +63,10 @@ class SimpleFaceTracker:
         union_area = box1_area + box2_area - inter_area
 
         return inter_area / union_area if union_area > 0 else 0
+
+    def get_active_tracks(self):
+        """Returns a dict of active track_id -> current_box for all non-stale tracks."""
+        return self.active_tracks
 
     def _match_boxes(self, current_boxes) -> Tuple:
         """Performs IOU matching between active tracks and current boxes."""
@@ -99,6 +114,8 @@ class SimpleFaceTracker:
         # 2. Match current boxes to active tracks using IOU
         matches, unmatched_current, unmatched_tracks = self._match_boxes(current_boxes)
 
+        current_time = time.time()
+
         # 3. Update matched tracks with new box, reset missed count
         for track_idx, box_idx in matches:
             track_id = list(self.active_tracks.keys())[track_idx]
@@ -115,8 +132,12 @@ class SimpleFaceTracker:
         for track_idx in unmatched_tracks:
             track_id = list(self.active_tracks.keys())[track_idx]
             self.active_tracks[track_id].mark_missed()
-            if self.active_tracks[track_id].missed_count > self.max_missed:
+            
+            # Delete if missed too many frames or if track is too old
+            if (self.active_tracks[track_id].missed_count > self.max_missed or
+                current_time - self.active_tracks[track_id].last_seen_time > self.max_age_seconds):
                 to_delete.append(track_id)
+                
         for track_id in to_delete:
             del self.active_tracks[track_id]
 
