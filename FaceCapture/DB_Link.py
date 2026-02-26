@@ -44,7 +44,7 @@ class DB_Link:
     
     async def get_all_vectors_async(self) -> Dict[int, List[float]]:
         """Get all face vectors from database"""
-        rows = await self.conn.fetch('SELECT id, encoding FROM faces')
+        rows = await self.conn.fetch('SELECT id, encoding FROM encodings') # change back to 'faces', if needed
         vectors_dict = {}
         for row in rows:
             # pgvector returns the vector as a string that needs parsing
@@ -65,6 +65,21 @@ class DB_Link:
                 INSERT INTO faces (id, encoding) 
                 VALUES ($1, $2)
             ''', id, vector_str)
+            return True
+        except Exception as e:
+            print(f"Error saving vector to database: {e}")
+            return False
+        
+    async def save_encoding_async(self, encoding: List[float], path: str) -> bool:
+        """Save face vector and image url to encodings table"""
+        try:
+            # Convert list to pgvector format: [1.0, 2.0, 3.0]
+            vector_str = '[' + ','.join(map(str, encoding)) + ']'
+
+            await self.conn.execute('''
+                INSERT INTO encodings (encoding, path) 
+                VALUES ($1, $2)
+            ''', vector_str, path)
             return True
         except Exception as e:
             print(f"Error saving vector to database: {e}")
@@ -127,6 +142,11 @@ class DB_Link:
         """Synchronous wrapper to save face vector"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.save_face_vector_async(face_id, vector))
+
+    def save_encoding(self, encoding: List[float], path: str) -> bool:
+        """Synchronous wrapper to save encoding and path"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.save_encoding_async(encoding, path))
 
     def clear_db(self) -> bool:
         """Synchronous wrapper to clear database"""

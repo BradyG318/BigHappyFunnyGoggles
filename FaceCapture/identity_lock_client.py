@@ -106,7 +106,7 @@ def get_face_crop(frame: np.ndarray, face_landmarks):
     left = max(0, left-pad); right = min(w, right+pad)
     top = max(0, top-pad); bottom = min(h, bottom+pad)
 
-    if right - left < 60 or bottom - top < 60: return None
+    if right - left < 60 or bottom - top < 60: return None, None
     
     return frame[top:bottom, left:right], [left, top, right, bottom]
 
@@ -227,7 +227,7 @@ class FaceCaptureClient:
         """Main loop for face detection, quality check, and server communication."""
         
         with mp_face_mesh.FaceMesh(
-            max_num_faces=2,
+            max_num_faces=4,
             refine_landmarks=True,
             static_image_mode=False,
             min_detection_confidence=0.5,
@@ -377,7 +377,7 @@ class FaceCaptureClient:
                             else:
                                 # FAILED: Set cooldown with exponential backoff
                                 track.failed_attempts += 1
-                                cooldown = min(2 ** track.failed_attempts, 30)  # Exponential backoff, max 30s
+                                cooldown = min(2 ** track.failed_attempts, 10)  # Exponential backoff, max 30s
 
                                 track.server_id = None
                                 track.pending_seq_num = None  # IMPORTANT: Clear pending flag!

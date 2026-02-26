@@ -23,7 +23,7 @@ class FaceRecognitionServer:
     DEEPFACE_MODEL = 'Facenet512'
 
     # Recognition Threshold 
-    RECOGNITION_THRESHOLD = 0.80
+    RECOGNITION_THRESHOLD = 0.75
 
     # Pose Thresholds (ID is looser than Capture)
     POSE_QUALITY_THRESHOLD_ID = 0.50
