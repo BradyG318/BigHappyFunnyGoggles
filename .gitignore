@@ -30,3 +30,6 @@ __pycache__/
 Graveyard/
 
 Temp/
+
+# Environment variables
+.env
