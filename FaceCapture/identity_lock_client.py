@@ -19,6 +19,9 @@ from IDPacket import IDPacket
 # Detection Tracker
 from face_tracker import SimpleFaceTracker
 
+# Database Link (temporarily used for getting info from info table)
+import DB_Link
+
 #Client Config
 
 # Network
@@ -127,11 +130,11 @@ class FaceCaptureClient:
         self.seq_num = 0 #initialize at 0, increment after receiving response
         self.recent_face_ids = [None] * 5 # Last 5 recognized face IDs for context
         
-        # ID Mode State
+        # ID Mode Variables
         self.is_new_id = False
         self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
         
-        self.tracker = SimpleFaceTracker(iou_threshold=0.3, max_frames_missed=5, max_age_seconds = 30)
+        self.tracker = SimpleFaceTracker(iou_threshold=0.25, max_frames_missed=5, max_age_seconds = 30)
         
         self._connect_to_server()
         
@@ -185,19 +188,20 @@ class FaceCaptureClient:
             # Receive IDPacket length (4 bytes)
             response_len_data = self._recv_exactly(4)
             
+            # Workaround for the fact that we currently have the length prefix in the deserialize method
             clone = response_len_data
             
-            # Handle connection loss and attempt to reconnect TODO: TEST THIS
-            # if not response_len_data:
-            #     # Connection broken, try to reconnect
-            #     print("[WARN] Connection lost, reconnecting...")
-            #     if not self._connect_to_server():
-            #         return None
-            #     # Retry sending the packet
-            #     self.sock.sendall(serialized_packet)
-            #     response_len_data = self._recv_exactly(4)
-            #     if not response_len_data:
-            #         return None
+            # Handle connection loss and attempt to reconnect
+            if not response_len_data:
+                # Connection broken, try to reconnect
+                print("[WARN] Connection lost, reconnecting...")
+                if not self._connect_to_server():
+                    return None
+                # Retry sending the packet
+                self.sock.sendall(serialized_packet)
+                response_len_data = self._recv_exactly(4)
+                if not response_len_data:
+                    return None
                 
             response_len = struct.unpack('>I', response_len_data)[0]
             
@@ -225,6 +229,8 @@ class FaceCaptureClient:
 
     def run(self):
         """Main loop for face detection, quality check, and server communication."""
+        # TODO: Move all this stuff server side
+        DB_Link.db_link.initialize()
         
         with mp_face_mesh.FaceMesh(
             max_num_faces=4,
@@ -312,7 +318,14 @@ class FaceCaptureClient:
                         # If already recognized, just display
                         if track.server_id is not None:
                             display_id = track.server_id
-                            status = f"ID: #{display_id}"
+                            
+                            # Get info related to this ID from the database
+                            db_info = DB_Link.db_link.get_info_by_id(display_id)
+                            
+                            if db_info is None:
+                                db_info = {"fullname": "Unknown", "age": "Unknown"}
+                            
+                            status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
                             color = (0, 255, 0)  # Green
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
@@ -427,6 +440,8 @@ if __name__ == "__main__":
         client.run()
     except IOError as e:
         print(f"Failed to start client: {e}")
+        DB_Link.db_link.close()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+        DB_Link.db_link.close()
         print(traceback.format_exc())

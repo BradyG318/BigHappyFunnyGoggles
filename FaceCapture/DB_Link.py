@@ -126,6 +126,19 @@ class DB_Link:
             print(f"Error retrieving image from database: {e}")
             return None
 
+    async def get_info_by_id_async(self, id: int) -> Dict[str, Any]:
+        """Get all information for a face entry by ID"""
+        try:
+            row = await self.conn.fetchrow('SELECT * FROM info WHERE id = $1', id)
+            if row:
+                return dict(row)
+            else:
+                print(f"No entry found for ID: {id}")
+                return {}
+        except Exception as e:
+            print(f"Error retrieving info from database: {e}")
+            return {}
+
     # Synchronous wrappers for async methods
 
     def initialize(self):
@@ -162,6 +175,11 @@ class DB_Link:
         """Synchronous wrapper to get image data by id"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.get_face_image_async())
+    
+    def get_info_by_id(self, id: int) -> Dict[str, Any]:
+        """Synchronous wrapper to get info by id"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.get_info_by_id_async(id))
 
 # Global database handler instance
 db_link = DB_Link()
