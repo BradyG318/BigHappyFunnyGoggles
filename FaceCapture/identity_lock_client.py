@@ -20,7 +20,7 @@ from IDPacket import IDPacket
 from face_tracker import SimpleFaceTracker
 
 # Database Link (temporarily used for getting info from info table)
-import DB_Link
+#import DB_Link
 
 #Client Config
 
@@ -230,7 +230,7 @@ class FaceCaptureClient:
     def run(self):
         """Main loop for face detection, quality check, and server communication."""
         # TODO: Move all this stuff server side
-        DB_Link.db_link.initialize()
+        #DB_Link.db_link.initialize()
         
         with mp_face_mesh.FaceMesh(
             max_num_faces=4,
@@ -320,12 +320,12 @@ class FaceCaptureClient:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
-                            db_info = DB_Link.db_link.get_info_by_id(display_id)
+                            # db_info = DB_Link.db_link.get_info_by_id(display_id)
                             
-                            if db_info is None:
-                                db_info = {"fullname": "Unknown", "age": "Unknown"}
+                            # if db_info is None:
+                            #     db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
-                            status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
+                            status = f"ID: #{display_id}" #| {db_info.get('fullname')} | {db_info.get('age')} yrs"
                             color = (0, 255, 0)  # Green
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
@@ -440,8 +440,8 @@ if __name__ == "__main__":
         client.run()
     except IOError as e:
         print(f"Failed to start client: {e}")
-        DB_Link.db_link.close()
+        #DB_Link.db_link.close()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        DB_Link.db_link.close()
+        #DB_Link.db_link.close()
         print(traceback.format_exc())
