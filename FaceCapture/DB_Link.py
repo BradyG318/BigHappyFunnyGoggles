@@ -3,6 +3,8 @@ import os
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 import asyncio
+import faiss
+import numpy as np
 
 load_dotenv()
 
@@ -10,6 +12,9 @@ class DB_Link:
     def __init__(self):
         self.connection_pool = None
         self.event_loop = None
+        self.faiss_index = None
+        self.id_to_index = {} # Mapping from database ID to FAISS index
+        self.index_to_id = [] # Mapping from FAISS index to database ID
     
     def get_event_loop(self):
         """Get or create event loop for synchronous operations"""
@@ -28,6 +33,56 @@ class DB_Link:
             loop = self.get_event_loop()
             loop.run_until_complete(self.conn.close())
 
+    def build_faiss_index(self, vectors_dict: Dict[int, List[float]]):
+        """
+        Build a FAISS index from all vectors stored in the database.
+        vectors_dict: {id: [float, ...]} - all normalized vectors.
+        """
+        if not vectors_dict:
+            self.faiss_index = None
+            self.id_to_index = {}
+            self.index_to_id = []
+            return
+
+        dim = len(next(iter(vectors_dict.values())))   # embedding dimension
+        # Use inner product index (cosine similarity on normalized vectors)
+        index = faiss.IndexFlatIP(dim)
+
+        # Prepare data
+        ids = []
+        vectors = []
+        for db_id, vec in vectors_dict.items():
+            ids.append(db_id)
+            vectors.append(vec)
+
+        vectors_np = np.array(vectors).astype('float32')
+
+        index.add(vectors_np)   # adds vectors to index
+
+        self.faiss_index = index
+        self.index_to_id = ids
+        self.id_to_index = {db_id: i for i, db_id in enumerate(ids)}
+    
+    def search_faiss(self, query_vector: List[float], threshold: float = 0.75, k: int = 1):
+        """
+        Search the FAISS index for the closest match.
+        Returns (id, similarity) if similarity >= threshold, else None.
+        """
+        if self.faiss_index is None:
+            return None
+
+        # Prepare query
+        query = np.array([query_vector]).astype('float32')
+
+        # Search
+        similarities, indices = self.faiss_index.search(query, k)
+        best_sim = similarities[0][0]
+        best_idx = indices[0][0]
+
+        if best_sim >= threshold and best_idx != -1:
+            return self.index_to_id[best_idx], best_sim
+        return None
+    
     # Asynchronous methods
 
     async def init_connection(self):

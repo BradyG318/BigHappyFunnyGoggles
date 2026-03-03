@@ -303,11 +303,16 @@ class FaceRecognitionServer:
                 return None
             
             # Check identity against all known faces
-            match_id = self.recognize_by_range(embedding, self.known_face_ids) #DEBUG we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
-                
-            if match_id is not None:
-                self.logger.info(f"Face recognized as ID #{match_id}")
-                    
+            #match_id = self.recognize_by_range(embedding, self.known_face_ids) #DEBUG we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
+            
+            embedding_list = embedding.tolist() if embedding is not None else None
+            if embedding_list is None:
+                return None
+            
+            match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
+            if match:
+                match_id, similarity = match
+                self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity:.3f})")
                 return match_id
                 
             else:
@@ -346,31 +351,18 @@ class FaceRecognitionServer:
         # Load existing vectors from database
         try:            
             vectors_dict = DB_Link.db_link.get_all_vectors()
-            for face_id_str, vector_list in vectors_dict.items():
-                face_id = int(face_id_str) # Convert string key to int
-                self.known_face_ids.append(face_id)
-                self.known_face_encodings[face_id] = np.array(vector_list)
-                self.next_face_id = max(self.next_face_id, face_id + 1)
+            
+            # Still store ids and encodings for recognize by range
+            self.known_face_ids = list(vectors_dict.keys())
+            self.known_face_encodings = {id: np.array(vec) for id, vec in vectors_dict.items()}
 
-            self.logger.info(f"Loaded {len(self.known_face_ids)} existing faces from database. Next ID will be {self.next_face_id}.")
+            # Build FAISS index for fast search
+            DB_Link.db_link.build_faiss_index(vectors_dict)
+
+            self.logger.info(f"Loaded {len(self.known_face_ids)} faces and built FAISS index.")
         
         except Exception as e:
             self.logger.error(f"Error loading from database: {e}. Starting fresh.")
-    
-    def save_data_to_database(self, face_id, encoding):
-        """
-        Saves the vector to PostgreSQL database.
-        """
-        # Save the final vector to database synchronously
-        success = DB_Link.db_link.save_face_vector(face_id, encoding.tolist())
-    
-        if not success:
-            self.logger.error(f"!!! ERROR saving vector to database for face #{face_id}")
-            return False
-
-        self.logger.info(f"Added face ID {face_id} to database")
-        
-        return True
 
 # ~~~ MAIN ~~~
 if __name__ == "__main__":    
