@@ -312,7 +312,7 @@ class FaceRecognitionServer:
             match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:
                 match_id, similarity = match
-                self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity:.3f})")
+                self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
                 return match_id
                 
             else:

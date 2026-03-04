@@ -69,6 +69,7 @@ class FilterPyBoxKalman:
 class Track:
     """Internal class to hold state for a single tracked face."""
     def __init__(self, initial_box: Tuple[int, int, int, int], track_id: int):
+        # Tracking details
         self.track_id = track_id
         self.current_box = initial_box
         self.missed_count = 0
@@ -83,6 +84,9 @@ class Track:
         self.last_recognition_time = 0
         self.recognition_cooldown = 0
         self.failed_attempts = 0
+        
+        # List to store 10 crops
+        self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
 
     def update(self, new_box: Tuple[int, int, int, int]):
         self.kalman.update(new_box)
