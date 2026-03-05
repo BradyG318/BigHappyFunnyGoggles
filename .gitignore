@@ -29,6 +29,3 @@ __pycache__/
 # sumthin
 FaceCapture/.env
 FaceCapture/Graveyard
-dist
-build
-client_alpha.spec
