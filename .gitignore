@@ -25,3 +25,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# sumthin
+FaceCapture/.env
+FaceCapture/Graveyard
+dist
+build
+client_alpha.spec
