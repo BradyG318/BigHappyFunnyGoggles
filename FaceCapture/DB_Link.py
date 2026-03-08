@@ -11,6 +11,7 @@ load_dotenv()
 class DB_Link:
     def __init__(self):
         self.connection_pool = None
+        self.conn = None
         self.event_loop = None
         self.faiss_index = None
         self.id_to_index = {} # Mapping from database ID to FAISS index
@@ -149,15 +150,16 @@ class DB_Link:
             print(f"Error deleting entry from database: {e}")
             return False
     
-    async def clear_db_async(self) -> bool:
-        """Clear all entries in the faces table"""
-        try:
-            await self.conn.execute('DELETE FROM faces')
-            print("Database cleared.")
-            return True
-        except Exception as e:
-            print(f"Error clearing database: {e}")
-            return False
+    # Commented out because I'm paranoid
+    # async def clear_db_async(self) -> bool:
+    #     """Clear all entries in the faces table"""
+    #     try:
+    #         await self.conn.execute('DELETE FROM faces')
+    #         print("Database cleared.")
+    #         return True
+    #     except Exception as e:
+    #         print(f"Error clearing database: {e}")
+    #         return False
 
     async def get_face_image_async(self, id: int) -> Any:
         """Get face image path by ID and return image data"""
@@ -216,10 +218,10 @@ class DB_Link:
         loop = self.get_event_loop()
         return loop.run_until_complete(self.save_encoding_async(encoding, path))
 
-    def clear_db(self) -> bool:
-        """Synchronous wrapper to clear database"""
-        loop = self.get_event_loop()
-        return loop.run_until_complete(self.clear_db_async())
+    # def clear_db(self) -> bool:
+    #     """Synchronous wrapper to clear database"""
+    #     loop = self.get_event_loop()
+    #     return loop.run_until_complete(self.clear_db_async())
 
     def delete_entry(self, id: int) -> bool:
         """Synchronous wrapper to delete entry by id"""

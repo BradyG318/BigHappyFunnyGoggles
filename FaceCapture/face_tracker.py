@@ -85,8 +85,9 @@ class Track:
         self.recognition_cooldown = 0
         self.failed_attempts = 0
         
-        # List to store 10 crops
-        self.capture_crops: List[np.ndarray] = [] # Accumulates the 10 crops
+        # Buffer for retry logic
+        self.crop_buffer = []
+        self.buffer_full = False
 
     def update(self, new_box: Tuple[int, int, int, int]):
         self.kalman.update(new_box)

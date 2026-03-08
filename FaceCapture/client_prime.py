@@ -266,27 +266,26 @@ class FaceCaptureClient:
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
 
                         if raw_face_crop is None: continue
-                        
+                            
                         processed_face_crop = conservative_lighting_normalization(raw_face_crop)
-                        
+                            
                         sharpness = get_image_sharpness(processed_face_crop)
                         pose_score = get_pose_quality(face_landmarks)
-                        
+                            
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD                          
-                        
+                            
                         is_pose_ok = pose_score >= POSE_QUALITY_THRESHOLD
                         
-                        # Always append the box for tracking
+                        # Always append the most recent box for tracking
                         current_frame_boxes.append(track_box)
                         face_crops_for_boxes.append(processed_face_crop)
                         
                         # Check quality and attach to list
                         if is_sharp_enough and is_pose_ok:
-                            quality_list.append(True)
-                            
+                            quality_list.append(True) # Mark as good quality
                         else:
-                            quality_list.append(False)
-
+                            quality_list.append(False) # Mark as poor quality
+                    
                     # Update tracker: get persistent track_ids for this frame's boxes
                     tracker_results = self.tracker.update(current_frame_boxes)
                     
@@ -336,17 +335,11 @@ class FaceCaptureClient:
                             cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                             continue
-
+                        
                         # Check if there's a pending request
                         if track.pending_seq_num is not None:
-                            status = f"Verifying Track {track_id}..."
-                            color = (255, 255, 0)  # Yellow
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
-                                        (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                             continue
-
+                        
                         # Check quality before sending
                         if not current_quality:
                             status = "Poor Quality"
@@ -358,15 +351,33 @@ class FaceCaptureClient:
                             continue
 
                         # HEARTBEAT CHECK: Good quality, not in cooldown, no pending request
-                        # Send to server, get seq_num
-                        packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
+                        
+                        # First attempt or no recent IDs (ID CASE with 10 crops)
+                        if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): #ID Case (10 crops)
+                            if not track.buffer_full:
+                                # Increment track buffer with new crop and check if full
+                                track.crop_buffer.append(current_crop)
+                                if len(track.crop_buffer) > BEST_SAMPLES_TO_AVERAGE:
+                                    track.buffer_full = True
+                                else:
+                                    continue # Wait until we have enough crops to send
+                            
+                            # Packet with empty recent IDs -> server checks full DB
+                            packet = FacePacket(self.seq_num, track.crop_buffer, [None]*5)
+                            print("DEBUG ID CASE (10 crops)")
+                            
+                        # First attempt failed or recent IDs available (RE-ID CASE with 1 crop + recent IDs)
+                        else:
+                            packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
+                            print("DEBUG RETRY/CONTEXT CASE (1 crop + recent IDs)")
+                            
                         track.pending_seq_num = self.seq_num  # Mark that we have a pending request
                         response = self._send_packet_and_receive_id(packet)
 
                         if response:
                             track.last_recognition_time = current_time
 
-                            if response.success:
+                            if response.success: # SUCCESS CASE
                                 # SUCCESS: Store the recognized ID
                                 track.server_id = response.face_id
                                 track.pending_seq_num = None
@@ -380,17 +391,22 @@ class FaceCaptureClient:
                                 status = f"ID: #{response.face_id}"
                                 color = (0, 255, 0)  # Green
 
-                            else:
+                            else: # need to implement retry logic with ID Case (failed attempts > 0 || recent_faces == 0)
                                 # FAILED: Set cooldown with exponential backoff
                                 track.failed_attempts += 1
                                 cooldown = min(2 ** track.failed_attempts, 10)  # Exponential backoff, max 30s
 
                                 track.server_id = None
-                                track.pending_seq_num = None  # IMPORTANT: Clear pending flag!
+                                track.pending_seq_num = None # Clear pending flag on failure
                                 track.recognition_cooldown = current_time + cooldown
 
                                 status = f"Unknown (Retry in {cooldown}s)"
                                 color = (255, 165, 0)  # Orange
+                                
+                                # Reset buffer upon ID Case failure to force re-collection of crops (helps if person is moving or lighting changes)
+                                if track.buffer_full:
+                                    track.buffer_full = False
+                                    track.crop_buffer.clear()
 
                             self.seq_num += 1
 
