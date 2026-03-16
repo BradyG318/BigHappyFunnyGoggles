@@ -364,7 +364,7 @@ class FaceCaptureClient:
                             
                             # Get info related to this ID from the database
                             #db_info = DB_Link.db_link.get_info_by_id(display_id)
-                            
+                            db_info=None
                             if db_info is None:
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
