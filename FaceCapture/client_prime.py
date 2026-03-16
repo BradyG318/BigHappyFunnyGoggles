@@ -9,6 +9,8 @@ import argparse
 from typing import List, Optional
 import time
 import traceback
+import threading
+import queue
 
 warnings.filterwarnings("ignore")
 
@@ -20,7 +22,7 @@ from IDPacket import IDPacket
 from face_tracker import SimpleFaceTracker
 
 # Database Link (temporarily used for getting info from info table)
-import DB_Link
+#import DB_Link
 
 #Client Config
 
@@ -131,9 +133,58 @@ class FaceCaptureClient:
         
         self.tracker = SimpleFaceTracker(iou_threshold=0.25, max_frames_missed=5, max_age_seconds = 30)
         
+        #Threading stuff 
+        self.request_queue = queue.Queue() #Stores the packets that are waiting to be sent to the server
+
+        #Create/start the background thread (should close when main program closes)
+        self.network_thread = threading.Thread(target=self._network_worker, daemon=True)
+        self.network_thread.start()
+
         self._connect_to_server()
         
     # Networking functions 
+
+    def _network_worker(self):
+        """Background thread that handles sending packets and receiving responses."""
+        while True:
+            #Wait for a packet to be added to the queue
+            task = self.request_queue.get()
+            if task is None:
+                break #Exit the thread if there is no task
+            track_id, packet = task
+
+            response = self._send_packet_and_receive_id(packet)
+            current_time = time.time()
+
+            #Update tracker with server's repsonse
+            if track_id in self.tracker.get_active_tracks():
+                track = self.tracker.get_active_tracks()[track_id]
+                track.last_recognition_time = current_time
+                if response:
+                    if response.success:
+                        track.server_id = response.face_id
+                        track.pending_seq_num = None
+                        track.recognition_cooldown = 0.0
+                        track.failed_attempts = 0
+                        
+                        self.recent_face_ids.insert(0, response.face_id)
+                        self.recent_face_ids = self.recent_face_ids[:5]
+                    else:
+                        track.failed_attempts += 1
+                        cooldown = min(2 ** track.failed_attempts, 10)
+                        track.server_id = None
+                        track.pending_seq_num = None
+                        track.recognition_cooldown = current_time + cooldown
+
+                        if track.buffer_full:
+                            track.buffer_full = False
+                            track.crop_buffer.clear()
+
+                        else:
+                            track.recognition_cooldown = current_time + 1.0
+                            track.pending_seq_num = None
+                    self.request_queue.task_done()
+
 
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
@@ -225,7 +276,7 @@ class FaceCaptureClient:
     def run(self):
         """Main loop for face detection, quality check, and server communication."""
         # TODO: Move all this stuff server side
-        DB_Link.db_link.initialize()
+       # DB_Link.db_link.initialize()
         
         with mp_face_mesh.FaceMesh(
             max_num_faces=4,
@@ -312,7 +363,7 @@ class FaceCaptureClient:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
-                            db_info = DB_Link.db_link.get_info_by_id(display_id)
+                            #db_info = DB_Link.db_link.get_info_by_id(display_id)
                             
                             if db_info is None:
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
@@ -326,96 +377,55 @@ class FaceCaptureClient:
                             continue  # Skip server query for this face
 
                         # Check if we're in cooldown after a failed attempt
-                        if current_time < track.recognition_cooldown:
+                        elif current_time < track.recognition_cooldown:
                             cooldown_left = track.recognition_cooldown - current_time
                             status = f"Retry in {cooldown_left:.1f}s"
                             color = (255, 165, 0)  # Orange
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
-                                        (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                            continue
+                           
                         
                         # Check if there's a pending request
-                        if track.pending_seq_num is not None:
-                            continue
+                        elif track.pending_seq_num is not None:
+                            status = "Recognizing..."
+                            color = (0, 255, 255)  # Yellow
                         
                         # Check quality before sending
-                        if not current_quality:
+                        elif not current_quality:
                             status = "Poor Quality"
                             color = (0, 0, 255)  # Red
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
-                                        (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                            continue
-
-                        # HEARTBEAT CHECK: Good quality, not in cooldown, no pending request
-                        
-                        # First attempt or no recent IDs (ID CASE with 10 crops)
-                        if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): #ID Case (10 crops)
-                            if not track.buffer_full:
-                                # Increment track buffer with new crop and check if full
-                                track.crop_buffer.append(current_crop)
-                                if len(track.crop_buffer) > BEST_SAMPLES_TO_AVERAGE:
-                                    track.buffer_full = True
-                                else:
-                                    continue # Wait until we have enough crops to send
                             
-                            # Packet with empty recent IDs -> server checks full DB
-                            packet = FacePacket(self.seq_num, track.crop_buffer, [None]*5)
-                            print("DEBUG ID CASE (10 crops)")
-                            
-                        # First attempt failed or recent IDs available (RE-ID CASE with 1 crop + recent IDs)
                         else:
-                            packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
-                            print("DEBUG RETRY/CONTEXT CASE (1 crop + recent IDs)")
-                            
-                        track.pending_seq_num = self.seq_num  # Mark that we have a pending request
-                        response = self._send_packet_and_receive_id(packet)
-
-                        if response:
-                            track.last_recognition_time = current_time
-
-                            if response.success: # SUCCESS CASE
-                                # SUCCESS: Store the recognized ID
-                                track.server_id = response.face_id
-                                track.pending_seq_num = None
-                                track.recognition_cooldown = 0.0
-                                track.failed_attempts = 0
-
-                                # Add to recent IDs for context
-                                self.recent_face_ids.insert(0, response.face_id)
-                                self.recent_face_ids = self.recent_face_ids[:5]
-
-                                status = f"ID: #{response.face_id}"
-                                color = (0, 255, 0)  # Green
-
-                            else: # need to implement retry logic with ID Case (failed attempts > 0 || recent_faces == 0)
-                                # FAILED: Set cooldown with exponential backoff
-                                track.failed_attempts += 1
-                                cooldown = min(2 ** track.failed_attempts, 10)  # Exponential backoff, max 30s
-
-                                track.server_id = None
-                                track.pending_seq_num = None # Clear pending flag on failure
-                                track.recognition_cooldown = current_time + cooldown
-
-                                status = f"Unknown (Retry in {cooldown}s)"
-                                color = (255, 165, 0)  # Orange
-                                
-                                # Reset buffer upon ID Case failure to force re-collection of crops (helps if person is moving or lighting changes)
+                            #First attempt or no recent IDs (ID CASE with 10 crops)
+                            if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): 
+                                if not track.buffer_full:
+                                    track.crop_buffer.append(current_crop)
+                                    if len(track.crop_buffer) >= BEST_SAMPLES_TO_AVERAGE:
+                                        track.buffer_full = True
+                                    else:
+                                        #Still gathering crops, set status and skip sending
+                                        status = f"Gathering {len(track.crop_buffer)}/{BEST_SAMPLES_TO_AVERAGE}"
+                                        color = (255, 255, 0)  # Cyan
+                                        
+                                #If the buffer just filled up, prep the packet and send
                                 if track.buffer_full:
-                                    track.buffer_full = False
-                                    track.crop_buffer.clear()
-
-                            self.seq_num += 1
-
-                        else:
-                            # Network error, short cooldown
-                            track.recognition_cooldown = current_time + 1.0
-                            track.pending_seq_num = None  # Clear pending flag on network error
-                            status = "Network Error"
-                            color = (255, 0, 0)  # Blue
+                                    packet = FacePacket(self.seq_num, track.crop_buffer, [None]*5)
+                                    
+                                    track.pending_seq_num = self.seq_num  
+                                    self.request_queue.put((track_id, packet))
+                                    self.seq_num += 1
+                                    
+                                    status = "Recognizing..."
+                                    color = (0, 255, 255)  # Yellow
+                                    
+                            #First attempt failed or recent IDs available (RE-ID CASE with 1 crop + recent IDs)
+                            else:
+                                packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
+                                
+                                track.pending_seq_num = self.seq_num  
+                                self.request_queue.put((track_id, packet))
+                                self.seq_num += 1
+                                
+                                status = "Recognizing..."
+                                color = (0, 255, 255)  # Yellow
 
                         # Draw the box and status
                         cv2.rectangle(frame, (current_box[0], current_box[1]), 
@@ -449,8 +459,8 @@ if __name__ == "__main__":
         client.run()
     except IOError as e:
         print(f"Failed to start client: {e}")
-        DB_Link.db_link.close()
+        #DB_Link.db_link.close()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        DB_Link.db_link.close()
+       # DB_Link.db_link.close()
         print(traceback.format_exc())
