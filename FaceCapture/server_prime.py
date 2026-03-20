@@ -320,8 +320,6 @@ class FaceRecognitionServer:
                 embedding_list = embedding.tolist() if embedding is not None else None
                 if embedding_list is None:
                     return None
-
-                print("DEBUG: embedding_list =", embedding_list)
                 
                 match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
                 if match:
