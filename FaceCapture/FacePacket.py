@@ -38,7 +38,7 @@ class FacePacket:
                 compressed_crops.append(b'')
                 crop_sizes.append(0)
             else:
-                _, encoded = cv2.imencode('.jpg', face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                _, encoded = cv2.imencode('.jpg', face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90]) #TODO: look into pickle or tar
                 crop_data = encoded.tobytes()
                 compressed_crops.append(crop_data)
                 crop_sizes.append(len(crop_data))
@@ -74,18 +74,9 @@ class FacePacket:
         return complete_packet
     
     @staticmethod
-    def deserialize(data):
+    def deserialize(packet_data):
         """Deserializes TCP packet with length prefix"""
         try:
-            # Verify we have enough data
-            if len(data) < 5:
-                return None
-            
-            # Read length prefix
-            total_length = struct.unpack('>I', data[:4])[0]
-            
-            # Skip length prefix
-            packet_data = data[4:4 + total_length]
             current_pos = 0
             
             # Read sequence number

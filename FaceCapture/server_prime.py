@@ -10,6 +10,7 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Suppress TensorFlow logging
 import tensorflow as tf
 tf.get_logger().setLevel('ERROR')  # Suppress TensorFlow logging
 from deepface import DeepFace
+import ssl
 
 from FacePacket import FacePacket #receive
 from IDPacket import IDPacket #send
@@ -40,6 +41,10 @@ class FaceRecognitionServer:
         """
         self.host = host
         self.port = port
+        
+        # Load SSL context with server certificate and key
+        self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
         
         # TCP Server
         self.server_socket = None
@@ -78,8 +83,11 @@ class FaceRecognitionServer:
                     client_socket, client_addr = self.server_socket.accept()
                     self.logger.info(f"Accepted connection from {client_addr}")
                     
+                    ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
+                    self.logger.info(f"SSL handshake completed with {client_addr}")
+                    
                     # Handle connection
-                    self._accept_connection(client_socket, client_addr)
+                    self._accept_connection(ssl_client_socket, client_addr)
                     
                     # Connection closed, wait for new one
                     self.logger.info("Connection closed, waiting for new connection...")
@@ -122,13 +130,11 @@ class FaceRecognitionServer:
                     # Read the actual packet
                     packet_data = self._recv_exactly(client_socket, packet_length)
                     
-                    #DEBUG might wanna wait for full packet
-                    
                     if not packet_data:
                         break
                     
                     # Process full packet
-                    seq_num, response = self._process_packet(length_data + packet_data, client_addr)
+                    seq_num, response = self._process_packet(packet_data, client_addr)
                     
                     self.logger.debug("DEBUG: seq_num =", {seq_num}, "response =", {response})
                     
@@ -314,7 +320,7 @@ class FaceRecognitionServer:
             
             # Check against recent IDs first if available
             if recent_ids[0] is not None:
-                match_id = self.recognize_by_range(embedding, recent_ids) #DEBUG we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
+                match_id = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
             
             else:
                 embedding_list = embedding.tolist() if embedding is not None else None
@@ -339,7 +345,12 @@ class FaceRecognitionServer:
         try:
             # Create IDPacket based on result
             if result is not None:
-                response_packet = IDPacket(True, seq_num, result)
+                db_info = DB_Link.db_link.get_info_by_id(result)
+                
+                if db_info is None: # Handle case where ID exists but no info found from DB
+                    db_info = {"fullname": "Unknown", "age": 0}
+                
+                response_packet = IDPacket(True, seq_num, result, fullname=db_info.get("fullname"), age=db_info.get("age"))
             else:
                 response_packet = IDPacket(False, seq_num)
             

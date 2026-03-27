@@ -11,6 +11,7 @@ import time
 import traceback
 import threading
 import queue
+import ssl
 
 warnings.filterwarnings("ignore")
 
@@ -20,9 +21,6 @@ from IDPacket import IDPacket
 
 # Detection Tracker
 from face_tracker import SimpleFaceTracker
-
-# Database Link (temporarily used for getting info from info table)
-#import DB_Link
 
 #Client Config
 
@@ -43,6 +41,9 @@ mp_face_mesh = mp.solutions.face_mesh
 # Pose/Quality Thresholds
 POSE_QUALITY_THRESHOLD = 0.89
 SHARPNESS_THRESHOLD = 50.0
+
+# UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
+ID_INFO = {} # maybe move this to track object eventually
 
 # Utility functions 
 
@@ -150,6 +151,7 @@ class FaceCaptureClient:
             #Wait for a packet to be added to the queue
             task = self.request_queue.get()
             if task is None:
+                print("[INFO] Network worker thread exiting...")
                 break #Exit the thread if there is no task
             track_id, packet = task
 
@@ -167,8 +169,12 @@ class FaceCaptureClient:
                         track.recognition_cooldown = 0.0
                         track.failed_attempts = 0
                         
+                        # Store and truncate recent IDs for context in future packets
                         self.recent_face_ids.insert(0, response.face_id)
                         self.recent_face_ids = self.recent_face_ids[:5]
+                        
+                        if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
+                            ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
                     else:
                         track.failed_attempts += 1
                         cooldown = min(2 ** track.failed_attempts, 10)
@@ -199,6 +205,13 @@ class FaceCaptureClient:
             self.sock.settimeout(TIMEOUT)
             self.sock.connect((self.host, self.port))
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
+            
+            # Wrap the socket with SSL
+            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            context.check_hostname = False  # Disable hostname checking
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
             print(f"[ERROR] Failed to connect to server: {e}")
@@ -234,9 +247,6 @@ class FaceCaptureClient:
             # Receive IDPacket length (4 bytes)
             response_len_data = self._recv_exactly(4)
             
-            # Workaround for the fact that we currently have the length prefix in the deserialize method
-            clone = response_len_data
-            
             # Handle connection loss and attempt to reconnect
             if not response_len_data:
                 # Connection broken, try to reconnect
@@ -252,10 +262,10 @@ class FaceCaptureClient:
             response_len = struct.unpack('>I', response_len_data)[0]
             
             # Receive the IDPacket payload
-            response_payload = self._recv_exactly(response_len) #accounting for seq num
+            response_payload = self._recv_exactly(response_len)
             if not response_payload: return None
             
-            return IDPacket.deserialize(clone + response_payload) #TODO: remove length prefix from deserialize method because this is so fucking stupid
+            return IDPacket.deserialize(response_payload)
                 
         except socket.timeout as e:
             print(f"[ERROR] Socket timeout: {e}")
@@ -275,8 +285,6 @@ class FaceCaptureClient:
 
     def run(self):
         """Main loop for face detection, quality check, and server communication."""
-        # TODO: Move all this stuff server side
-       # DB_Link.db_link.initialize()
         
         with mp_face_mesh.FaceMesh(
             max_num_faces=4,
@@ -363,9 +371,9 @@ class FaceCaptureClient:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
-                            #db_info = DB_Link.db_link.get_info_by_id(display_id)
-                            db_info=None
-                            if db_info is None:
+                            db_info = ID_INFO.get(display_id)
+                            
+                            if db_info is None or db_info.get("age") == 0 or db_info.get("fullname") == "": # Handle case where ID exists but no info found from DB
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
                             status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
@@ -459,8 +467,6 @@ if __name__ == "__main__":
         client.run()
     except IOError as e:
         print(f"Failed to start client: {e}")
-        #DB_Link.db_link.close()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-       # DB_Link.db_link.close()
         print(traceback.format_exc())
