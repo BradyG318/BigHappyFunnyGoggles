@@ -35,7 +35,7 @@ class IDPacket:
             packet_data += fullname_bytes
 
         # Store length prefix
-        total_length = len(packet_data)
+        total_length = len(packet_data) + 4 # 4 bytes for sequence number
         
         # Create header
         header = struct.pack('>I', total_length) + struct.pack('>I', self.seq_num)

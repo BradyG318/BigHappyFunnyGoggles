@@ -357,8 +357,6 @@ class FaceRecognitionServer:
                 response_packet = IDPacket(False, seq_num)
             
             response_data = response_packet.serialize()
-            
-            # Then send the actual packet data
             client_socket.sendall(response_data)
             
             self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success} face_id={response_packet.face_id}")
