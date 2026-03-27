@@ -311,8 +311,6 @@ class FaceRecognitionServer:
                     embedding = embedding / np.linalg.norm(embedding) if np.linalg.norm(embedding) > 0 else embedding
                 else:
                     embedding = None
-
-            #DEBUG chew rest of empty list?
             
             if embedding is None:
                 self.logger.info("No valid embedding generated for face")
@@ -321,6 +319,10 @@ class FaceRecognitionServer:
             # Check against recent IDs first if available
             if recent_ids[0] is not None:
                 match_id = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
+
+                if match_id is not None:
+                    self.logger.info(f"Face recognized by recent IDs as ID #{match_id}")
+                    return match_id
             
             else:
                 embedding_list = embedding.tolist() if embedding is not None else None
@@ -355,10 +357,6 @@ class FaceRecognitionServer:
                 response_packet = IDPacket(False, seq_num)
             
             response_data = response_packet.serialize()
-            
-            # Send the 4-byte length prefix FIRST
-            length_prefix = struct.pack('>I', len(response_data))
-            client_socket.sendall(length_prefix)
             
             # Then send the actual packet data
             client_socket.sendall(response_data)

@@ -163,7 +163,9 @@ class FaceCaptureClient:
                 track = self.tracker.get_active_tracks()[track_id]
                 track.last_recognition_time = current_time
                 if response:
+                    print("DEBUG 1")
                     if response.success:
+                        print("DEBUG 2")
                         track.server_id = response.face_id
                         track.pending_seq_num = None
                         track.recognition_cooldown = 0.0
@@ -176,8 +178,9 @@ class FaceCaptureClient:
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
                     else:
+                        print("DEBUG 3")
                         track.failed_attempts += 1
-                        cooldown = min(2 ** track.failed_attempts, 10)
+                        cooldown = min(1.5 ** track.failed_attempts, 6)
                         track.server_id = None
                         track.pending_seq_num = None
                         track.recognition_cooldown = current_time + cooldown
