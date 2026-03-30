@@ -31,7 +31,7 @@ SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 1  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
+CAMERA_INDEX = 0  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -208,10 +208,10 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            context.check_hostname = False  # Disable hostname checking
-            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            # context.check_hostname = False  # Disable hostname checking
+            # self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
             print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
