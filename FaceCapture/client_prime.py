@@ -384,14 +384,15 @@ class FaceCaptureClient:
 
                             ##UI Crapola
                             color = (0, 255, 0)  # Green
+                            x1, y1, x2, y2 = current_box
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, nameLine, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                            cv2.putText(frame, ageLine, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                            cv2.putText(frame, idLine, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            cv2.putText(frame, nameLine, (x1, y1 - 35),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+                            cv2.putText(frame, ageLine, (x1, y1 - 18),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+                            cv2.putText(frame, idLine, (x1, y1 - 1),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
                             continue  # Skip server query for this face
 
                         # Check if we're in cooldown after a failed attempt
