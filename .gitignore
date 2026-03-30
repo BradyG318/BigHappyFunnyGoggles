@@ -35,3 +35,7 @@ Graveyard/
 # Security
 *.key
 *.crt
+
+# Misc
+nuclear bunker
+LItest.json
