@@ -25,12 +25,13 @@ from face_tracker import SimpleFaceTracker
 #Client Config
 
 # Network
-SERVER_HOST = '76.28.113.73' #'127.0.0.1'        
+#SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
+SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
 # Camera
-CAMERA_INDEX = 0  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
+CAMERA_INDEX = 1  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -376,11 +377,20 @@ class FaceCaptureClient:
                             if db_info is None or db_info.get("age") == 0 or db_info.get("fullname") == "": # Handle case where ID exists but no info found from DB
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
-                            status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
+                            #status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
+                            nameLine = f"Name: {db_info.get('fullname')}"
+                            ageLine = f"Age: {db_info.get('age')}"
+                            idLine = f"ID: #{display_id}"
+
+                            ##UI Crapola
                             color = (0, 255, 0)  # Green
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
+                            cv2.putText(frame, nameLine, (current_box[0], current_box[1]-10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            cv2.putText(frame, ageLine, (current_box[0], current_box[1]-10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                            cv2.putText(frame, idLine, (current_box[0], current_box[1]-10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                             continue  # Skip server query for this face
 

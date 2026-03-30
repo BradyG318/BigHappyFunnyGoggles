@@ -25,7 +25,7 @@ from face_tracker import SimpleFaceTracker
 #Client Config
 
 # Network
-SERVER_HOST = '76.28.113.73' #'127.0.0.1'        
+SERVER_HOST = '76.28.113.73' #'127.0.0.1'       
 SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
