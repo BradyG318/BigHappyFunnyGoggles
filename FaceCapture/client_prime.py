@@ -25,8 +25,8 @@ from face_tracker import SimpleFaceTracker
 #Client Config
 
 # Network
-#SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
-SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
+SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
+#SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
 TIMEOUT = 30.0
 
@@ -87,9 +87,9 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
         shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
         
-        if mean_brightness > 200 and std_brightness < 40: #this is for too bright so dont mess with this 
-            gamma = 1.3; inv_gamma = 1.0 / gamma
-            table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+        if mean_brightness > 200 and std_brightness < 40: #this is for too bright 
+            gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
+            table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
             return cv2.LUT(face_crop, table)
         elif mean_brightness < 60 or shadow_area < 35: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
             alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
