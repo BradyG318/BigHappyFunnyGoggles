@@ -31,3 +31,7 @@ Graveyard/
 
 # Environment variables
 .env
+
+# Security
+*.key
+*.crt
