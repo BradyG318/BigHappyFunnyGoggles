@@ -323,10 +323,10 @@ class FaceCaptureClient:
                     for face_landmarks in results.multi_face_landmarks:
                         # Pre-processing and quality checks 
                         raw_face_crop, border = get_face_crop(frame, face_landmarks)
+                        if raw_face_crop is None: continue
+                        
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
 
-                        if raw_face_crop is None: continue
-                            
                         processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                             
                         sharpness = get_image_sharpness(processed_face_crop)
@@ -377,7 +377,6 @@ class FaceCaptureClient:
                             if db_info is None or db_info.get("age") == 0 or db_info.get("fullname") == "": # Handle case where ID exists but no info found from DB
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
-                            #status = f"ID: #{display_id} | {db_info.get('fullname')} | {db_info.get('age')} yrs"
                             nameLine = f"Name: {db_info.get('fullname')}"
                             ageLine = f"Age: {db_info.get('age')}"
                             idLine = f"ID: #{display_id}"
@@ -387,11 +386,11 @@ class FaceCaptureClient:
                             x1, y1, x2, y2 = current_box
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, nameLine, (x1, y1 - 35),
+                            cv2.putText(frame, nameLine, (x1, y1 - 42),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
-                            cv2.putText(frame, ageLine, (x1, y1 - 18),
+                            cv2.putText(frame, ageLine, (x1, y1 - 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
-                            cv2.putText(frame, idLine, (x1, y1 - 1),
+                            cv2.putText(frame, idLine, (x1, y1 - 6),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
                             continue  # Skip server query for this face
 
