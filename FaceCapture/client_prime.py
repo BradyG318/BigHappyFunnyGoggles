@@ -331,7 +331,7 @@ class FaceCaptureClient:
                         
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
-                        if track.bt_sent_for_id != response.face_id:
+                        if ENABLEBT and track.bt_sent_for_id != response.face_id:
                             bt_packet = BluetoothIdentityPacket(
                                 track_id=track_id,
                                 face_id=response.face_id,
