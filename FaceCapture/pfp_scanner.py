@@ -107,6 +107,28 @@ def save_data_to_database(encoding, image_source):
     return True
 
 # ----------------------------------------------------------------------
+def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
+    """Conservative lighting normalization that preserves facial features."""
+    if face_crop is None or face_crop.size == 0: return face_crop
+    
+    try:
+        lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:,:,0]
+        mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
+        shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
+        
+        if mean_brightness > 200 and std_brightness < 40: #this is for too bright 
+            gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
+            table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
+            return cv2.LUT(face_crop, table)
+        elif mean_brightness < 60 or shadow_area < 35: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+            alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
+            return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
+        else:
+            return face_crop
+    except Exception:
+        return face_crop
+
 def process_single_image(image_source):
     """
     Process one image (local path or URL): detect face, generate embedding, save to DB.
@@ -142,6 +164,7 @@ def process_single_image(image_source):
     bottom = min(h, bottom + pad)
 
     face_crop = img[top:bottom, left:right]
+    face_crop = conservative_lighting_normalization(face_crop)
     encoding = get_deepface_embedding(face_crop)
     if encoding is None:
         print(f"Error: Could not generate embedding for {image_source}")
