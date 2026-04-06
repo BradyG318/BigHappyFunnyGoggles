@@ -1,3 +1,4 @@
+from FaceCapture import BluetoothIdentityPacket
 import cv2
 import numpy as np
 import warnings
@@ -176,6 +177,16 @@ class FaceCaptureClient:
                         
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
+                        if track.bt_sent_for_id != response.face_id:
+                            bt_packet = BluetoothIdentityPacket(
+                                track_id=track_id,
+                                face_id=response.face_id,
+                                age=response.age,
+                                fullname=response.fullname,
+                                face_crop=track.latest_crop
+                            )
+                            self.bt_send(bt_packet.serialize())
+                            track.bt_sent_for_id = response.face_id
                     else:
                         track.failed_attempts += 1
                         cooldown = min(1.5 ** track.failed_attempts, 6)
@@ -193,6 +204,13 @@ class FaceCaptureClient:
                     self.request_queue.task_done()
 
 
+    def bt_send(self, data: bytes):
+        if not hasattr(self, "bt_sock") or self.bt_sock is None:
+            return
+        try:
+            self.bt_sock.sendall(data)
+        except Exception as e:
+            print(f"[BT ERROR] {e}")
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
@@ -358,6 +376,7 @@ class FaceCaptureClient:
                         try:
                             box_index = current_frame_boxes.index(current_box)
                             current_crop = face_crops_for_boxes[box_index]
+                            track.latest_crop = current_crop
                             current_quality = quality_list[box_index]
                         except ValueError:
                             continue # Box not found, skip

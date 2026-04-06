@@ -74,6 +74,8 @@ class Track:
         self.current_box = initial_box
         self.missed_count = 0
         self.last_seen_time = time.time()
+        self.latest_crop = None
+        self.bt_sent_for_id = None
 
         # Kalman filter for this track
         self.kalman = FilterPyBoxKalman(initial_box)
