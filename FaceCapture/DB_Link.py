@@ -195,6 +195,25 @@ class DB_Link:
         except Exception as e:
             print(f"Error retrieving info from database: {e}")
             return {}
+        
+    async def get_all_paths_async(self) -> Dict[int, str]:
+        """Get all image paths from the database"""
+        try:
+            rows = await self.conn.fetch('SELECT id, path FROM encodings')
+            return {row['id']: row['path'] for row in rows if row['path']}
+        except Exception as e:
+            print(f"Error retrieving paths from database: {e}")
+            return {}
+
+    async def replace_encoding_async(self, id: int, new_encoding: List[float]) -> bool:
+        """Replace an existing encoding by ID"""
+        try:
+            vector_str = '[' + ','.join(map(str, new_encoding)) + ']'
+            await self.conn.execute('UPDATE encodings SET encoding = $1 WHERE id = $2', vector_str, id)
+            return True
+        except Exception as e:
+            print(f"Error replacing encoding in database: {e}")
+            return False
 
     # Synchronous wrappers for async methods
 
@@ -231,12 +250,22 @@ class DB_Link:
     def get_face_image(self, id: int):
         """Synchronous wrapper to get image data by id"""
         loop = self.get_event_loop()
-        return loop.run_until_complete(self.get_face_image_async())
+        return loop.run_until_complete(self.get_face_image_async(id))
     
     def get_info_by_id(self, id: int) -> Dict[str, Any]:
         """Synchronous wrapper to get info by id"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.get_info_by_id_async(id))
+    
+    def get_all_paths(self) -> Dict[int, str]:
+        """Get all image paths from the database"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.get_all_paths_async())
+    
+    def replace_encoding(self, id: int, new_encoding: List[float]) -> bool:
+        """Synchronous wrapper to replace encoding by id"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.replace_encoding_async(id, new_encoding))
 
 # Global database handler instance
 db_link = DB_Link()
