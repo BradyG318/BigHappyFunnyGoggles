@@ -376,13 +376,14 @@ class FaceCaptureClient:
                         try:
                             box_index = current_frame_boxes.index(current_box)
                             current_crop = face_crops_for_boxes[box_index]
-                            track.latest_crop = current_crop
+                            
                             current_quality = quality_list[box_index]
                         except ValueError:
                             continue # Box not found, skip
-                        
+
                         # Get track object
                         track = active_tracks[track_id]
+                        track.latest_crop = current_crop
                         
                         current_time = time.time()
                         
