@@ -375,6 +375,35 @@ class FaceCaptureClient:
                 self.bt_sock = None
                 self.bt_client_info = None
                 return False
+
+    def start_bt_listener(self):
+        t = threading.Thread(target=self.bt_listen, daemon=True)
+        t.start()
+
+    def bt_listen(self):
+        buffer_size: int = 1024
+        if not hasattr(self, "bt_sock") or self.bt_sock is None:
+            return
+
+        try:
+            while True:
+                data = self.bt_sock.recv(buffer_size)
+
+                # If no data, the connection is likely closed
+                if not data:
+                    print("[BT] Connection closed by peer")
+                    break
+
+                # Handle received data
+                self.handle_bt_data(data)
+
+        except Exception as e:
+            print(f"[BT ERROR] {e}")
+
+    def handle_bt_data(self, data: bytes):
+        json_str = data.decode()
+        person_data = json.load(json_str)
+        print(person_data)
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
