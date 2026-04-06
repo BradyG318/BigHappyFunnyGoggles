@@ -159,6 +159,7 @@ class FaceCaptureClient:
         self.bt_sock = None
         self.bt_client_info = None
         self.bt_lock = threading.Lock()
+        self.bt_running = False
         
         self.bt_accept_thread = None
         self.bt_recv_thread = None
@@ -306,6 +307,7 @@ class FaceCaptureClient:
             task = self.request_queue.get()
             if task is None:
                 print("[INFO] Network worker thread exiting...")
+                self.request_queue.task_done()
                 break #Exit the thread if there is no task
             track_id, packet = task
 
@@ -353,7 +355,7 @@ class FaceCaptureClient:
                         else:
                             track.recognition_cooldown = current_time + 1.0
                             track.pending_seq_num = None
-                    self.request_queue.task_done()
+            self.request_queue.task_done()
 
 
     def bt_send(self, data: bytes):
@@ -401,9 +403,12 @@ class FaceCaptureClient:
             print(f"[BT ERROR] {e}")
 
     def handle_bt_data(self, data: bytes):
-        json_str = data.decode()
-        person_data = json.load(json_str)
-        print(person_data)
+        try:
+            json_str = data.decode("utf-8")
+            person_data = json.loads(json_str)
+            print(person_data)
+        except Exception as e:
+            print(f"[BT ERROR] Failed to parse incoming Bluetooth data: {e}")
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
