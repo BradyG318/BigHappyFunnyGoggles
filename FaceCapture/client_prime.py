@@ -1,4 +1,4 @@
-from FaceCapture import BluetoothIdentityPacket
+import BluetoothIdentityPacket
 import cv2
 import numpy as np
 import warnings
