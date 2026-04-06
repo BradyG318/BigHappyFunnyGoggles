@@ -13,6 +13,7 @@ import traceback
 import threading
 import queue
 import ssl
+import json
 
 warnings.filterwarnings("ignore")
 
@@ -22,6 +23,11 @@ from IDPacket import IDPacket
 
 # Detection Tracker
 from face_tracker import SimpleFaceTracker
+
+try:
+    import bluetooth #Pi Crap
+except ImportError:
+    bluetooth = None
 
 #Client Config
 
@@ -44,11 +50,16 @@ mp_face_mesh = mp.solutions.face_mesh
 POSE_QUALITY_THRESHOLD = 0.89
 SHARPNESS_THRESHOLD = 50.0
 
+# Bluetooth Consts
+BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
+BT_SERVICE_NAME = "IKnowYouGlasses"
+BT_BACKLOG = 1
+ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
 
 # Utility functions 
-
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
     lm = landmarks.landmark
@@ -143,8 +154,149 @@ class FaceCaptureClient:
         self.network_thread = threading.Thread(target=self._network_worker, daemon=True)
         self.network_thread.start()
 
-        self._connect_to_server()
+        # Bluetooth initialization
+        self.bt_server_sock = None
+        self.bt_sock = None
+        self.bt_client_info = None
+        self.bt_lock = threading.Lock()
         
+        self.bt_accept_thread = None
+        self.bt_recv_thread = None
+        if(ENABLEBT and bluetooth is not None): 
+            self.bt_running = True
+            self._start_bluetooth_server()
+        else:
+            print("Bluetooth Disabled Nerd")
+
+        self._connect_to_server()
+    #Bluetooth Functions
+    def _start_bluetooth_server(self):
+        """Start an RFCOMM Bluetooth server so the Android app can connect."""
+        if bluetooth is None:
+            print("[BT ERROR] PyBluez is not installed. Bluetooth server cannot start.")
+            return
+
+        try:
+            self.bt_server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+            self.bt_server_sock.bind(("", bluetooth.PORT_ANY))
+            self.bt_server_sock.listen(BT_BACKLOG)
+
+            port = self.bt_server_sock.getsockname()[1]
+
+            bluetooth.advertise_service(
+                self.bt_server_sock,
+                BT_SERVICE_NAME,
+                service_id=BT_UUID,
+                service_classes=[BT_UUID, bluetooth.SERIAL_PORT_CLASS],
+                profiles=[bluetooth.SERIAL_PORT_PROFILE]
+            )
+
+            print(f"[BT INFO] Bluetooth RFCOMM server listening on channel {port}")
+            print(f"[BT INFO] Service '{BT_SERVICE_NAME}' advertised with UUID {BT_UUID}")
+
+            self.bt_accept_thread = threading.Thread(
+                target=self._accept_bluetooth_connections,
+                daemon=True
+            )
+            self.bt_accept_thread.start()
+
+        except Exception as e:
+            print(f"[BT ERROR] Failed to start Bluetooth server: {e}")
+            self.bt_server_sock = None
+
+    def _accept_bluetooth_connections(self):
+        """Accept Android app Bluetooth connections in the background."""
+        while self.bt_running and self.bt_server_sock is not None:
+            try:
+                print("[BT INFO] Waiting for Android Bluetooth connection...")
+                client_sock, client_info = self.bt_server_sock.accept()
+
+                print(f"[BT INFO] Bluetooth client connected: {client_info}")
+
+                with self.bt_lock:
+                    if self.bt_sock is not None:
+                        try:
+                            self.bt_sock.close()
+                        except Exception:
+                            pass
+
+                    self.bt_sock = client_sock
+                    self.bt_client_info = client_info
+
+                self.bt_recv_thread = threading.Thread(
+                    target=self._bluetooth_receive_loop,
+                    daemon=True
+                )
+                self.bt_recv_thread.start()
+
+            except Exception as e:
+                if self.bt_running:
+                    print(f"[BT ERROR] Accept failed: {e}")
+
+    def _bluetooth_receive_loop(self):
+        """
+        Optional receive loop so the app can send settings packets to the glasses client.
+        Right now this just logs JSON if it receives any.
+        """
+        local_sock = None
+
+        with self.bt_lock:
+            local_sock = self.bt_sock
+
+        if local_sock is None:
+            return
+
+        while self.bt_running:
+            try:
+                data = local_sock.recv(4096)
+                if not data:
+                    print("[BT INFO] Android Bluetooth client disconnected.")
+                    break
+
+                try:
+                    decoded = data.decode("utf-8")
+                    print(f"[BT RX] Raw text: {decoded}")
+
+                    try:
+                        settings = json.loads(decoded)
+                        print(f"[BT RX] Parsed settings packet: {settings}")
+                    except json.JSONDecodeError:
+                        print("[BT RX] Received non-JSON data.")
+                except UnicodeDecodeError:
+                    print(f"[BT RX] Received {len(data)} raw bytes.")
+
+            except Exception as e:
+                print(f"[BT ERROR] Receive loop failed: {e}")
+                break
+
+        with self.bt_lock:
+            if self.bt_sock is local_sock:
+                try:
+                    self.bt_sock.close()
+                except Exception:
+                    pass
+                self.bt_sock = None
+                self.bt_client_info = None
+
+    def _stop_bluetooth(self):
+        """Clean up Bluetooth sockets."""
+        self.bt_running = False
+
+        with self.bt_lock:
+            if self.bt_sock is not None:
+                try:
+                    self.bt_sock.close()
+                except Exception:
+                    pass
+                self.bt_sock = None
+
+            if self.bt_server_sock is not None:
+                try:
+                    self.bt_server_sock.close()
+                except Exception:
+                    pass
+                self.bt_server_sock = None
+    
     # Networking functions 
 
     def _network_worker(self):
@@ -205,12 +357,24 @@ class FaceCaptureClient:
 
 
     def bt_send(self, data: bytes):
-        if not hasattr(self, "bt_sock") or self.bt_sock is None:
-            return
-        try:
-            self.bt_sock.sendall(data)
-        except Exception as e:
-            print(f"[BT ERROR] {e}")
+        with self.bt_lock:
+            if self.bt_sock is None:
+                print("[BT ERROR] No Android Bluetooth client is connected.")
+                return False
+
+            try:
+                self.bt_sock.sendall(data)
+                print(f"[BT TX] Sent {len(data)} bytes over Bluetooth.")
+                return True
+            except Exception as e:
+                print(f"[BT ERROR] Send failed: {e}")
+                try:
+                    self.bt_sock.close()
+                except Exception:
+                    pass
+                self.bt_sock = None
+                self.bt_client_info = None
+                return False
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
@@ -478,7 +642,9 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-        
+        #Cleanup but Bluetooth
+        self._stop_bluetooth()
+
         # Cleanup
         if self.sock: self.sock.close()
         self.cap.release()
