@@ -1,4 +1,4 @@
-import BluetoothIdentityPacket
+from BluetoothIdentityPacket import BluetoothIdentityPacket
 import cv2
 import numpy as np
 import warnings
@@ -29,6 +29,7 @@ try:
     import bluetooth #Pi Crap
 except ImportError:
     bluetooth = None
+    print("BT make me sad")
 
 #Client Config
 
