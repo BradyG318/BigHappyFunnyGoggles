@@ -107,13 +107,11 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
         shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
         
-        if mean_brightness > 150 or std_brightness < 40: #this is for too bright 
-            print("TOO BRIGHT, DARKENING IMAGE")
+        if mean_brightness > 150 and std_brightness < 40: #this is for too bright 
             gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
             table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
             return cv2.LUT(face_crop, table)
         elif mean_brightness < 40 or shadow_area < 50: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
-            print ("TOO DARK, LIFTING SHADOWS")
             alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
             return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
         else:
