@@ -599,7 +599,7 @@ class FaceCaptureClient:
                         current_time = time.time()
                         
                         # If already recognized, just display
-                        if track.server_id is not None:
+                        if track.server_id is not None and display_on:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
@@ -615,6 +615,7 @@ class FaceCaptureClient:
                             ##UI Crapola
                             color = (0, 255, 0)  # Green
                             x1, y1, x2, y2 = current_box
+                            
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(frame, nameLine, (x1, y1 - 42),
@@ -677,18 +678,19 @@ class FaceCaptureClient:
                                 color = (0, 255, 255)  # Yellow
 
                         # Draw the box and status
-                        cv2.rectangle(frame, (current_box[0], current_box[1]), 
-                                    (current_box[2], current_box[3]), color, 2)
-                        cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        if(display_on):
+                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
+                                        (current_box[2], current_box[3]), color, 2)
+                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                         
                 # Drawing the frame                
-                if(display_on):
-                    if(ui_transparency == 1.0):
-                        cv2.imshow('Face Capture Client (Glasses)', frame)
-                    else:
-                        combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
-                        cv2.imshow('Face Capture Client (Glasses)', combined_frame)
+                
+                if(ui_transparency == 1.0):
+                    cv2.imshow('Face Capture Client (Glasses)', frame)
+                else:
+                    combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
+                    cv2.imshow('Face Capture Client (Glasses)', combined_frame)
                 
                 # Handle keyboard inputs (only for quitting)
                 key = cv2.waitKey(1) & 0xFF
