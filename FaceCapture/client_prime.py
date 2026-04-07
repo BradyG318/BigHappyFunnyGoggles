@@ -14,6 +14,7 @@ import threading
 import queue
 import ssl
 import json
+import BluetoothSettingsPacket as bst
 
 warnings.filterwarnings("ignore")
 
@@ -58,6 +59,10 @@ ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
+
+max_num_people = 2
+display_on = True
+ui_transparency = 1.0
 
 # Utility functions 
 def get_pose_quality(landmarks) -> float:
@@ -260,7 +265,14 @@ class FaceCaptureClient:
 
                     try:
                         settings = json.loads(decoded)
+                        global max_num_people
+                        max_num_people = settings["numPeople"]
+                        global display_on
+                        display_on = settings["showDisplay"]
+                        global ui_transparency
+                        ui_transparency = settings["uiTransparency"]
                         print(f"[BT RX] Parsed settings packet: {settings}")
+                        
                     except json.JSONDecodeError:
                         print("[BT RX] Received non-JSON data.")
                 except UnicodeDecodeError:
@@ -504,7 +516,7 @@ class FaceCaptureClient:
         """Main loop for face detection, quality check, and server communication."""
         
         with mp_face_mesh.FaceMesh(
-            max_num_faces=4,
+            max_num_faces=max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
             min_detection_confidence=0.5,
@@ -522,7 +534,8 @@ class FaceCaptureClient:
                 # Get frame
                 success, frame = self.cap.read()
                 if not success: continue
-                
+                original_frame = frame.copy()
+
                 # Initialize current frame data lists
                 current_frame_boxes = []
                 quality_list = []
@@ -670,7 +683,12 @@ class FaceCaptureClient:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
                         
                 # Drawing the frame                
-                cv2.imshow('Face Capture Client (Glasses)', frame)
+                if(display_on):
+                    if(ui_transparency == 1.0):
+                        cv2.imshow('Face Capture Client (Glasses)', frame)
+                    else:
+                        combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
+                        cv2.imshow('Face Capture Client (Glasses)', combined_frame)
                 
                 # Handle keyboard inputs (only for quitting)
                 key = cv2.waitKey(1) & 0xFF
