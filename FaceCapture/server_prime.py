@@ -258,7 +258,7 @@ class FaceRecognitionServer:
             return 0
         return dot_product / (norm1 * norm2)
     
-    def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
+    def conservative_lighting_normalization(self, face_crop):
         """Conservative lighting normalization that preserves facial features."""
         if face_crop is None or face_crop.size == 0: return face_crop
         
