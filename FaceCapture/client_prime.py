@@ -37,6 +37,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
+ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 
 # Camera
@@ -56,7 +57,6 @@ SHARPNESS_THRESHOLD = 50.0
 BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
 BT_SERVICE_NAME = "IKnowYouGlasses"
 BT_BACKLOG = 1
-ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
