@@ -97,28 +97,6 @@ def get_image_sharpness(image: np.ndarray) -> float:
     score = cv2.Laplacian(gray, cv2.CV_64F).var()
     return score
 
-def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
-    """Conservative lighting normalization that preserves facial features."""
-    if face_crop is None or face_crop.size == 0: return face_crop
-    
-    try:
-        lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
-        l_channel = lab[:,:,0]
-        mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
-        shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
-        
-        if mean_brightness > 150 and std_brightness < 40: #this is for too bright 
-            gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
-            table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
-            return cv2.LUT(face_crop, table)
-        elif mean_brightness < 40 or shadow_area < 50: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
-            alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
-            return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
-        else:
-            return face_crop
-    except Exception:
-        return face_crop
-
 def get_face_crop(frame: np.ndarray, face_landmarks):
     """Extracts and crops the face from the frame based on landmarks and padding."""
     h, w = frame.shape[:2]
@@ -568,23 +546,20 @@ class FaceCaptureClient:
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
                         # Pre-processing and quality checks 
-                        raw_face_crop, border = get_face_crop(frame, face_landmarks)
-                        if raw_face_crop is None: continue
+                        face_crop, border = get_face_crop(frame, face_landmarks)
+                        if face_crop is None: continue
                         
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
-
-                        processed_face_crop = conservative_lighting_normalization(raw_face_crop)
                             
-                        sharpness = get_image_sharpness(processed_face_crop)
+                        sharpness = get_image_sharpness(face_crop)
                         pose_score = get_pose_quality(face_landmarks)
                             
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD                          
-                            
                         is_pose_ok = pose_score >= POSE_QUALITY_THRESHOLD
                         
                         # Always append the most recent box for tracking
                         current_frame_boxes.append(track_box)
-                        face_crops_for_boxes.append(processed_face_crop)
+                        face_crops_for_boxes.append(face_crop)
                         
                         # Check quality and attach to list
                         if is_sharp_enough and is_pose_ok:

@@ -26,7 +26,7 @@ class FaceRecognitionServer:
     DEEPFACE_MODEL = 'Facenet512'
 
     # Recognition Threshold 
-    RECOGNITION_THRESHOLD = 0.70
+    RECOGNITION_THRESHOLD = 0.72
     
     # To avoid duplicate tracking in one session TODO: implement
     currently_tracked_faces = set()
@@ -258,6 +258,28 @@ class FaceRecognitionServer:
             return 0
         return dot_product / (norm1 * norm2)
     
+    def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
+        """Conservative lighting normalization that preserves facial features."""
+        if face_crop is None or face_crop.size == 0: return face_crop
+        
+        try:
+            lab = cv2.cvtColor(face_crop, cv2.COLOR_BGR2LAB)
+            l_channel = lab[:,:,0]
+            mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
+            shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
+            
+            if mean_brightness > 150 and std_brightness < 40: #this is for too bright 
+                gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
+                table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
+                return cv2.LUT(face_crop, table)
+            elif mean_brightness < 40 or shadow_area < 50: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+                alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
+                return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
+            else:
+                return face_crop
+        except Exception:
+            return face_crop
+    
     def recognize_by_range(self, embedding, face_ids):
         """
         Recognize a face embedding against a provided list of face ids.
@@ -295,16 +317,22 @@ class FaceRecognitionServer:
             self.logger.debug(f"Recognizing {num_crops} face(s)")
             
             if num_crops == 1:
+                # Apply lighting normalization to single crop
+                processed_face_crop = self.conservative_lighting_normalization(face_crops[0])
+                
                 # Get encoding for single face
-                embedding = self.get_deepface_embedding(face_crops[0])
+                embedding = self.get_deepface_embedding(processed_face_crop)
                 if embedding is not None:
                     embedding = embedding / np.linalg.norm(embedding)
                 
             elif num_crops > 1:
                 # Get encodings for multiple faces and average them
                 embeddings = []
-                for crop in face_crops:
-                    emb = self.get_deepface_embedding(crop)
+                for face_crop in face_crops:
+                    # Apply lighting normalization to all crops
+                    processed_face_crop = self.conservative_lighting_normalization(face_crop)
+                    
+                    emb = self.get_deepface_embedding(processed_face_crop)
                     if emb is not None:
                         embeddings.append(emb)
                 
