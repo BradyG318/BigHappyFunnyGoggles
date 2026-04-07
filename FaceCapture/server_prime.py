@@ -26,7 +26,7 @@ class FaceRecognitionServer:
     DEEPFACE_MODEL = 'Facenet512'
 
     # Recognition Threshold 
-    RECOGNITION_THRESHOLD = 0.79
+    RECOGNITION_THRESHOLD = 0.70
     
     # To avoid duplicate tracking in one session TODO: implement
     currently_tracked_faces = set()
@@ -237,7 +237,7 @@ class FaceRecognitionServer:
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
                 enforce_detection=False,
-                align=True 			    
+                align=False
             )
             
             if embeddings:
@@ -297,6 +297,8 @@ class FaceRecognitionServer:
             if num_crops == 1:
                 # Get encoding for single face
                 embedding = self.get_deepface_embedding(face_crops[0])
+                if embedding is not None:
+                    embedding = embedding / np.linalg.norm(embedding)
                 
             elif num_crops > 1:
                 # Get encodings for multiple faces and average them
@@ -324,16 +326,15 @@ class FaceRecognitionServer:
                     self.logger.info(f"Face recognized by recent IDs as ID #{match_id}")
                     return match_id
             
-            else:
-                embedding_list = embedding.tolist() if embedding is not None else None
-                if embedding_list is None:
-                    return None
+            embedding_list = embedding.tolist() if embedding is not None else None
+            if embedding_list is None:
+                return None
                 
-                match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
-                if match:
-                    match_id, similarity = match
-                    self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
-                    return match_id
+            match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
+            if match:
+                match_id, similarity = match
+                self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
+                return match_id
                 
             # If no match found
             self.logger.info("Face not recognized")      

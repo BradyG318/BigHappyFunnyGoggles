@@ -38,7 +38,7 @@ class FacePacket:
                 compressed_crops.append(b'')
                 crop_sizes.append(0)
             else:
-                _, encoded = cv2.imencode('.jpg', face_crop, [cv2.IMWRITE_JPEG_QUALITY, 90]) #TODO: look into pickle or tar
+                _, encoded = cv2.imencode('.jpg', face_crop, [cv2.IMWRITE_JPEG_QUALITY, 95]) #TODO: look into pickle or tar
                 crop_data = encoded.tobytes()
                 compressed_crops.append(crop_data)
                 crop_sizes.append(len(crop_data))

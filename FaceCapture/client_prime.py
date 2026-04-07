@@ -36,7 +36,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-TIMEOUT = 30.0
+TIMEOUT = 60.0
 
 # Camera
 CAMERA_INDEX = 0  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
@@ -55,7 +55,7 @@ SHARPNESS_THRESHOLD = 50.0
 BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
 BT_SERVICE_NAME = "IKnowYouGlasses"
 BT_BACKLOG = 1
-ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
@@ -89,6 +89,8 @@ def get_pose_quality(landmarks) -> float:
     return score
 
 def get_image_sharpness(image: np.ndarray) -> float:
+    if image is None or image.size == 0: return 0.0
+    
     """Returns the variance of the Laplacian (sharpness score)."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     score = cv2.Laplacian(gray, cv2.CV_64F).var()
@@ -104,11 +106,13 @@ def conservative_lighting_normalization(face_crop: np.ndarray) -> np.ndarray:
         mean_brightness = np.mean(l_channel); std_brightness = np.std(l_channel)
         shadow_area = np.percentile(face_crop, 10) # Checking the shadows passed by the glasses 
         
-        if mean_brightness > 200 and std_brightness < 40: #this is for too bright 
+        if mean_brightness > 150 or std_brightness < 40: #this is for too bright 
+            print("TOO BRIGHT, DARKENING IMAGE")
             gamma = 1.5         #; inv_gamma = 1.0 / gamma  |darken the overexposured image
             table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8") #inv_gamma changes to gamma
             return cv2.LUT(face_crop, table)
-        elif mean_brightness < 60 or shadow_area < 35: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+        elif mean_brightness < 40 or shadow_area < 50: # originally (40) checking for shadows casted by the glasses to make sure that they arent't too much 
+            print ("TOO DARK, LIFTING SHADOWS")
             alpha = 1.3; beta = 45 # originally 1.2, 30 (hopefully 45 will lift the shadows)
             return cv2.convertScaleAbs(face_crop, alpha=alpha, beta=beta)
         else:
@@ -125,9 +129,16 @@ def get_face_crop(frame: np.ndarray, face_landmarks):
     left, right = int(min(x_coords)), int(max(x_coords))
     top, bottom = int(min(y_coords)), int(max(y_coords))
     
-    pad = 20
-    left = max(0, left-pad); right = min(w, right+pad)
-    top = max(0, top-pad); bottom = min(h, bottom+pad)
+    # Padding
+    pad_x = 0.05 * (right - left)
+    pad_y = 0.05 * (bottom - top)
+    
+    left = int(max(0, left - pad_x))
+    right = int(min(w, right + pad_x))
+    top = int(max(0, top - pad_y))
+    bottom = int(min(h, bottom + pad_y))
+
+    face_crop = frame[top:bottom, left:right]
 
     if right - left < 60 or bottom - top < 60: return None, None
     
@@ -355,10 +366,17 @@ class FaceCaptureClient:
                             track.bt_sent_for_id = response.face_id
                     else:
                         track.failed_attempts += 1
-                        cooldown = min(1.5 ** track.failed_attempts, 6)
+                        
+                        # if first attempt (near) instant retry, else usual
+                        if track.failed_attempts >= 2:
+                            cooldown = min(1.5 ** track.failed_attempts, 6)
+                        else:
+                            cooldown = 0.1
+                            
+                        track.recognition_cooldown = current_time + cooldown
+                        
                         track.server_id = None
                         track.pending_seq_num = None
-                        track.recognition_cooldown = current_time + cooldown
 
                         if track.buffer_full:
                             track.buffer_full = False
@@ -670,7 +688,7 @@ class FaceCaptureClient:
                             else:
                                 packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
                                 
-                                track.pending_seq_num = self.seq_num  
+                                track.pending_seq_num = self.seq_num
                                 self.request_queue.put((track_id, packet))
                                 self.seq_num += 1
                                 
