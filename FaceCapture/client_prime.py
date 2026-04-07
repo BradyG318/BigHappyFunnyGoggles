@@ -343,7 +343,7 @@ class FaceCaptureClient:
                         
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
-                        if track.bt_sent_for_id != response.face_id:
+                        if ENABLEBT and track.bt_sent_for_id != response.face_id:
                             bt_packet = BluetoothIdentityPacket(
                                 track_id=track_id,
                                 face_id=response.face_id,
@@ -436,10 +436,10 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            # context.check_hostname = False  # Disable hostname checking
-            # self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            context.check_hostname = False  # Disable hostname checking
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
             print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
@@ -694,6 +694,7 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
+                
         #Cleanup but Bluetooth
         self._stop_bluetooth()
 
