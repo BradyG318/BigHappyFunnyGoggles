@@ -39,9 +39,9 @@ SERVER_HOST = '76.28.113.73' #'127.0.0.1'
 SERVER_PORT =  33060 #5000
 ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
-camFramerate = 15
-frameWidth = 1280
-frameHeight = 720
+camFramerate = 20
+frameWidth = 1920
+frameHeight = 1080
 
 # Camera
 CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
@@ -64,12 +64,29 @@ BT_BACKLOG = 1
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
 
-max_num_people = 2
+max_num_people = 4
 display_on = True
 ui_transparency = 1.0
 font_scale = .55
 
-# Utility functions 
+# Utility functions
+# Function to preprocess the frame for better face detection
+def preprocess_frame(image):
+    # Reduce compression artifacts
+    image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+    
+    # Enhance contrast aggressively for longer range (helps with detection)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    lab[:,:,0] = cv2.createCLAHE(clipLimit=3.0).apply(lab[:,:,0])
+    image = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    
+    # Scale image up for better detection of smaller faces
+    # scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+    # height, width = image.shape[:2]
+    # image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+
+    return image
+
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
     lm = landmarks.landmark
@@ -173,6 +190,7 @@ class FaceCaptureClient:
             print("Bluetooth Disabled Nerd")
 
         self._connect_to_server()
+        
     #Bluetooth Functions
     def _start_bluetooth_server(self):
         """Start an RFCOMM Bluetooth server so the Android app can connect."""
@@ -549,6 +567,9 @@ class FaceCaptureClient:
                 face_crops_for_boxes = []
 
                 # Process frame for face landmarks
+                
+                frame = preprocess_frame(frame)
+                
                 frame.flags.writeable = False
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
@@ -620,13 +641,13 @@ class FaceCaptureClient:
                             color = (0, 255, 0)  # Green
                             x1, y1, x2, y2 = current_box
                             
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
+                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, nameLine, (x1, y1 - 42),
+                            cv2.putText(original_frame, nameLine, (x1, y1 - 42),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            cv2.putText(frame, ageLine, (x1, y1 - 25),
+                            cv2.putText(original_frame, ageLine, (x1, y1 - 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            cv2.putText(frame, idLine, (x1, y1 - 6),
+                            cv2.putText(original_frame, idLine, (x1, y1 - 6),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             continue  # Skip server query for this face
 
@@ -636,7 +657,6 @@ class FaceCaptureClient:
                             status = f"Retry in {cooldown_left:.1f}s"
                             color = (255, 165, 0)  # Orange
                            
-                        
                         # Check if there's a pending request
                         elif track.pending_seq_num is not None:
                             status = "Recognizing..."
@@ -683,15 +703,15 @@ class FaceCaptureClient:
 
                         # Draw the box and status
                         if(display_on):
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
+                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
+                            cv2.putText(original_frame, status, (current_box[0], current_box[1]-10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale + .05, color, 2)
                         
                 # Drawing the frame                
-                
                 if(ui_transparency == 1.0):
-                    cv2.imshow('Face Capture Client (Glasses)', frame)
+                    cv2.imshow('Face Capture Client (Glasses)', original_frame)
+                
                 else:
                     combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
                     cv2.imshow('Face Capture Client (Glasses)', combined_frame)
