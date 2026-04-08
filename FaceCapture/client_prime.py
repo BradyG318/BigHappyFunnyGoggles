@@ -37,7 +37,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
 
@@ -65,6 +65,7 @@ ID_INFO = {} # maybe move this to track object eventually
 max_num_people = 2
 display_on = True
 ui_transparency = 1.0
+font_scale = .55
 
 # Utility functions 
 def get_pose_quality(landmarks) -> float:
@@ -264,6 +265,8 @@ class FaceCaptureClient:
                         display_on = settings["showDisplay"]
                         global ui_transparency
                         ui_transparency = settings["uiTransparency"]
+                        global font_scale
+                        font_scale = settings["fontScale"]
                         print(f"[BT RX] Parsed settings packet: {settings}")
                         
                     except json.JSONDecodeError:
@@ -616,11 +619,11 @@ class FaceCaptureClient:
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(frame, nameLine, (x1, y1 - 42),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             cv2.putText(frame, ageLine, (x1, y1 - 25),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             cv2.putText(frame, idLine, (x1, y1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             continue  # Skip server query for this face
 
                         # Check if we're in cooldown after a failed attempt
@@ -679,7 +682,7 @@ class FaceCaptureClient:
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale + .05, color, 2)
                         
                 # Drawing the frame                
                 
