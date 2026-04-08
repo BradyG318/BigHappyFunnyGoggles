@@ -80,9 +80,9 @@ class DB_Link:
         best_sim = similarities[0][0]
         best_idx = indices[0][0]
 
-        if best_sim >= threshold and best_idx != -1:
+        if best_idx != -1:
             return self.index_to_id[best_idx], best_sim
-        return None
+        return None, None
     
     # Asynchronous methods
 
