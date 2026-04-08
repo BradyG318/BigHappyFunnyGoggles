@@ -136,7 +136,7 @@ class FaceCaptureClient:
         self.sock = None
         
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        self.cap.set(cv2.CAP_AUTO_AUTO_EXPOSURE, 3)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
         self.cap.set(cv2.CAP_PROP_FPS, camFramerate)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
@@ -358,7 +358,7 @@ class FaceCaptureClient:
                         
                         # if first attempt (near) instant retry, else usual
                         if track.failed_attempts >= 2:
-                            cooldown = min(1.5 ** track.failed_attempts, 6)
+                            cooldown = min(0.5 ** track.failed_attempts, 2)
                         else:
                             cooldown = 0.1
                             
@@ -443,10 +443,10 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            # context.check_hostname = False  # Disable hostname checking
-            #self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            context.check_hostname = False  # Disable hostname checking
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
             print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
