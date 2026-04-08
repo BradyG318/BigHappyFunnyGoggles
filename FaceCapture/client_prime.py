@@ -37,7 +37,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 
 # Camera
