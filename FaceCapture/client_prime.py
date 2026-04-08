@@ -40,8 +40,8 @@ SERVER_PORT =  33060 #5000
 ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
-frameWidth = 1920
-frameHeight = 1080
+frameWidth = 1280
+frameHeight = 720
 
 # Camera
 CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
