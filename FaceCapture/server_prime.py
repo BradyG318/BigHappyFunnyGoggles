@@ -43,8 +43,8 @@ class FaceRecognitionServer:
         self.port = port
         
         # Load SSL context with server certificate and key
-        self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
+        #self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        #self.ssl_context.load_cert_chain(certfile='server.crt')# keyfile='server.key')
         
         # TCP Server
         self.server_socket = None
@@ -83,11 +83,11 @@ class FaceRecognitionServer:
                     client_socket, client_addr = self.server_socket.accept()
                     self.logger.info(f"Accepted connection from {client_addr}")
                     
-                    ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
+                    #ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
                     self.logger.info(f"SSL handshake completed with {client_addr}")
                     
                     # Handle connection
-                    self._accept_connection(ssl_client_socket, client_addr)
+                    self._accept_connection(client_socket, client_addr)
                     
                     # Connection closed, wait for new one
                     self.logger.info("Connection closed, waiting for new connection...")
@@ -134,12 +134,12 @@ class FaceRecognitionServer:
                         break
                     
                     # Process full packet
-                    seq_num, response = self._process_packet(packet_data, client_addr)
+                    seq_num, response, similarity = self._process_packet(packet_data, client_addr)
                     
-                    self.logger.debug("DEBUG: seq_num =", {seq_num}, "response =", {response})
+                    self.logger.debug("DEBUG: seq_num =", {seq_num}, "response =", {response}, "similarity =", {similarity})
                     
                     # Send back response with recognition result
-                    self.send_result(client_socket, seq_num, response)
+                    self.send_result(client_socket, seq_num, response, similarity)
                 
                 except socket.timeout:
                     self.logger.debug(f"Connection from {client_addr} timed out")
@@ -195,14 +195,14 @@ class FaceRecognitionServer:
             self.logger.debug(f"Processing packet from {client_addr}: {len(face_crops)} faces")
             
             # Recognize face/faces
-            result = self.recognize_face(face_crops, recent_ids)
+            result, similarity = self.recognize_face(face_crops, recent_ids)
             
             self.logger.debug(f"Packet from {client_addr} processed in {time.time() - start_time:.2f}s")
-            return seq_num, result
+            return seq_num, result, similarity
             
         except Exception as e:
             self.logger.error(f"Packet processing error from {client_addr}: {e}")
-            return None, None
+            return None, None, None
 
     def _stop(self):
         """Stop server gracefully"""
@@ -296,13 +296,15 @@ class FaceRecognitionServer:
             
             if face_id in self.known_face_ids:
                 similarity = self.cosine_similarity(embedding, self.known_face_encodings[face_id])
-                        
-                if similarity > best_similarity and similarity >= self.RECOGNITION_THRESHOLD:
+                
+                if similarity > best_similarity:
                     best_similarity = similarity
+                        
+                if similarity >= self.RECOGNITION_THRESHOLD:
                     best_match_id = face_id
         
-        # Return best match or None if no match found
-        return best_match_id
+        # Return best match and best_similarity for response packet
+        return best_match_id, best_similarity
     
     def recognize_face(self, face_crops, recent_ids):
         """
@@ -310,6 +312,8 @@ class FaceRecognitionServer:
         Checks it against recent IDs
         Returns recognized face ID or None
         """
+        similarity = 0.0
+        
         try:
             # Check number of faces sent (check ID vs Capture)
             num_crops = len(face_crops)
@@ -348,11 +352,11 @@ class FaceRecognitionServer:
             
             # Check against recent IDs first if available
             if recent_ids[0] is not None:
-                match_id = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
+                match_id, similarity = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
 
-                if match_id is not None:
+                if match_id is not None and similarity >= self.RECOGNITION_THRESHOLD:
                     self.logger.info(f"Face recognized by recent IDs as ID #{match_id}")
-                    return match_id
+                    return match_id, similarity
             
             embedding_list = embedding.tolist() if embedding is not None else None
             if embedding_list is None:
@@ -361,34 +365,35 @@ class FaceRecognitionServer:
             match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:
                 match_id, similarity = match
-                self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
-                return match_id
+                if similarity >= self.RECOGNITION_THRESHOLD:
+                    self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
+                return match_id, similarity
                 
             # If no match found
             self.logger.info("Face not recognized")      
-            return None
+            return match_id, similarity
             
         except Exception as e:
             self.logger.error(f"Face recognition error: {e}")
     
-    def send_result(self, client_socket, seq_num, result):
+    def send_result(self, client_socket, seq_num, result, similarity):
         """Send recognition result back to client by IDPacket"""
         try:
             # Create IDPacket based on result
-            if result is not None:
+            if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD and result is not None:
                 db_info = DB_Link.db_link.get_info_by_id(result)
                 
                 if db_info is None: # Handle case where ID exists but no info found from DB
                     db_info = {"fullname": "Unknown", "age": 0}
                 
-                response_packet = IDPacket(True, seq_num, result, fullname=db_info.get("fullname"), age=db_info.get("age"))
+                response_packet = IDPacket(True, seq_num, result, similarity, fullname=db_info.get("fullname"), age=db_info.get("age"))
             else:
-                response_packet = IDPacket(False, seq_num)
+                response_packet = IDPacket(False, seq_num, result, similarity)
             
             response_data = response_packet.serialize()
             client_socket.sendall(response_data)
             
-            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success} face_id={response_packet.face_id}")
+            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
             
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
@@ -437,7 +442,7 @@ if __name__ == "__main__":
     server.load_data_from_database()
     
     try:
-        server._start() #_start() -> _accept_connection() -> _process_packet() -> recognize_face()
+        server._start() #_start() -> _accept_connection() -> _process_packet() -> recognize_face() {if re-ID: -> recognize_by_range() if ID: -> search_faiss()} -> send_result()
     except KeyboardInterrupt:
         server.logger.info("Server shutdown requested by user")
     except Exception as e:
