@@ -40,6 +40,8 @@ SERVER_PORT =  33060 #5000
 ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
+frameWidth = 1920
+frameHeight = 1080
 
 # Camera
 CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
@@ -136,6 +138,8 @@ class FaceCaptureClient:
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
         self.cap.set(cv2.CAP_AUTO_AUTO_EXPOSURE, 3)
         self.cap.set(cv2.CAP_PROP_FPS, camFramerate)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
 
 
         if not self.cap.isOpened():
