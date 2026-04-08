@@ -354,7 +354,7 @@ class FaceCaptureClient:
                         
                         # if first attempt (near) instant retry, else usual
                         if track.failed_attempts >= 2:
-                            cooldown = min(1.5 ** track.failed_attempts, 6)
+                            cooldown = min(0.5 ** track.failed_attempts, 2)
                         else:
                             cooldown = 0.1
                             
