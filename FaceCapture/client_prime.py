@@ -37,7 +37,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
 frameWidth = 1280
@@ -121,7 +121,7 @@ def get_face_crop(frame: np.ndarray, face_landmarks):
 
     face_crop = frame[top:bottom, left:right]
 
-    if right - left < 60 or bottom - top < 60: return None, None
+    #if right - left < 60 or bottom - top < 60: return None, None
     
     return frame[top:bottom, left:right], [left, top, right, bottom]
 
@@ -526,7 +526,7 @@ class FaceCaptureClient:
             max_num_faces=max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
-            min_detection_confidence=0.5,
+            min_detection_confidence=0.3,
             min_tracking_confidence=0.3
         ) as face_mesh:
 
