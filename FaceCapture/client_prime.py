@@ -439,10 +439,10 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            # context.check_hostname = False  # Disable hostname checking
-            #self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            context.check_hostname = False  # Disable hostname checking
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
             print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
