@@ -134,7 +134,7 @@ class FaceCaptureClient:
         self.sock = None
         
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
-        self.cap.set(cv2.CAP_AUTO_AUTO_EXPOSURE, 3)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
         self.cap.set(cv2.CAP_PROP_FPS, camFramerate)
 
 
