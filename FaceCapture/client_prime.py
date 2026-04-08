@@ -39,6 +39,7 @@ SERVER_HOST = '76.28.113.73' #'127.0.0.1'
 SERVER_PORT =  33060 #5000
 ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
+camFramerate = 15
 
 # Camera
 CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
@@ -132,6 +133,10 @@ class FaceCaptureClient:
         self.sock = None
         
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
+        self.cap.set(cv2.CAP_AUTO_AUTO_EXPOSURE, 3)
+        self.cap.set(cv2.CAP_PROP_FPS, camFramerate)
+
+
         if not self.cap.isOpened():
             raise IOError(f"Error: Could not open camera {CAMERA_INDEX}")
         
