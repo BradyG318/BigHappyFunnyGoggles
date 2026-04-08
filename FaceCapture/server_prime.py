@@ -44,7 +44,7 @@ class FaceRecognitionServer:
         
         # Load SSL context with server certificate and key
         self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        self.ssl_context.load_cert_chain(certfile='server.crt')# keyfile='server.key')
+        self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
         
         # TCP Server
         self.server_socket = None
@@ -348,7 +348,7 @@ class FaceRecognitionServer:
             
             if embedding is None:
                 self.logger.info("No valid embedding generated for face")
-                return None
+                return None, None
             
             # Check against recent IDs first if available
             if recent_ids[0] is not None:
@@ -360,7 +360,7 @@ class FaceRecognitionServer:
             
             embedding_list = embedding.tolist() if embedding is not None else None
             if embedding_list is None:
-                return None
+                return None, None
                 
             match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:

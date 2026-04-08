@@ -21,6 +21,13 @@ class IDPacket:
     def serialize(self):
         # Add success flag
         packet_data = struct.pack('>?', self.success)
+        
+        if self.face_id is None:
+            self.face_id = 0
+        
+        if self.similarity is None:
+            self.similarity = 0.0
+            
         # Add face ID
         packet_data += struct.pack('>I', self.face_id)
         # Add similarity
