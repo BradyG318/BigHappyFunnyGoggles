@@ -26,6 +26,16 @@ __pycache__/
 *$py.class
 *.so
 
-# sumthin
-FaceCapture/.env
-FaceCapture/Graveyard
+# Graveyard
+Graveyard/
+
+# Environment variables
+.env
+
+# Security
+*.key
+*.crt
+
+# Misc
+nuclear bunker
+LItest.json
