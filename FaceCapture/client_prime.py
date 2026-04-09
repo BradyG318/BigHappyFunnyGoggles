@@ -34,17 +34,17 @@ except ImportError:
 #Client Config
 
 # Network
-SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
-#SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
+#SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
+SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
 ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
-camFramerate = 20
-frameWidth = 1920
-frameHeight = 1080
+camFramerate = 15
+frameWidth = 1280
+frameHeight = 720
 
 # Camera
-CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
+CAMERA_INDEX = 1#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -542,7 +542,7 @@ class FaceCaptureClient:
         
         with mp_face_mesh.FaceMesh(
             max_num_faces=max_num_people,
-            refine_landmarks=True,
+            refine_landmarks=False,
             static_image_mode=False,
             min_detection_confidence=0.3,
             min_tracking_confidence=0.3
