@@ -325,7 +325,7 @@ class FaceRecognitionServer:
                 face_crop = cv2.resize(face_crops[0], (160, 160), interpolation=cv2.INTER_CUBIC)
                 
                 # Apply lighting normalization to single crop
-                processed_face_crop = face_crop#self.conservative_lighting_normalization(face_crop)
+                processed_face_crop = self.conservative_lighting_normalization(face_crop)
                 
                 # Get encoding for single face
                 embedding = self.get_deepface_embedding(processed_face_crop)
@@ -340,7 +340,7 @@ class FaceRecognitionServer:
                     face_crop = cv2.resize(face_crop, (160, 160), interpolation=cv2.INTER_CUBIC)
                     
                     # Apply lighting normalization to all crops
-                    processed_face_crop = face_crop#self.conservative_lighting_normalization(face_crop)
+                    processed_face_crop = self.conservative_lighting_normalization(face_crop)
                     
                     emb = self.get_deepface_embedding(processed_face_crop)
                     if emb is not None:
