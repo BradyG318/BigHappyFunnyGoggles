@@ -23,7 +23,7 @@ from FacePacket import FacePacket
 from IDPacket import IDPacket
 
 # Detection Tracker
-from face_tracker import SimpleFaceTracker
+from FaceCapture.FaceTracker import SimpleFaceTracker
 
 try:
     import bluetooth #Pi Crap

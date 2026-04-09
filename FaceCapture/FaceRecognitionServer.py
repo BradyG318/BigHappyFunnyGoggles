@@ -14,7 +14,7 @@ import ssl
 
 from FacePacket import FacePacket #receive
 from IDPacket import IDPacket #send
-import DB_Link
+import FaceCapture.DBLink as DBLink
 
 # Approaching finalized server design
 # If no recent IDs or retry attempt, average 10 crops and check against full database
@@ -368,7 +368,7 @@ class FaceRecognitionServer:
             if embedding_list is None:
                 return None, None
                 
-            match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
+            match = DBLink.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:
                 match_id, similarity = match
                 if similarity >= self.RECOGNITION_THRESHOLD:
@@ -387,7 +387,7 @@ class FaceRecognitionServer:
         try:
             # Create IDPacket based on result
             if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD and result is not None:
-                db_info = DB_Link.db_link.get_info_by_id(result)
+                db_info = DBLink.db_link.get_info_by_id(result)
                 
                 if db_info is None: # Handle case where ID exists but no info found from DB
                     db_info = {"fullname": "Unknown", "age": 0}
@@ -407,14 +407,14 @@ class FaceRecognitionServer:
     def load_data_from_database(self):
         # Load existing vectors from database
         try:            
-            vectors_dict = DB_Link.db_link.get_all_vectors()
+            vectors_dict = DBLink.db_link.get_all_vectors()
             
             # Still store ids and encodings for recognize by range
             self.known_face_ids = list(vectors_dict.keys())
             self.known_face_encodings = {id: np.array(vec) for id, vec in vectors_dict.items()}
 
             # Build FAISS index for fast search
-            DB_Link.db_link.build_faiss_index(vectors_dict)
+            DBLink.db_link.build_faiss_index(vectors_dict)
 
             self.logger.info(f"Loaded {len(self.known_face_ids)} faces and built FAISS index.")
         
@@ -425,7 +425,7 @@ class FaceRecognitionServer:
 if __name__ == "__main__":    
     # --- CONFIGURATION ---
     # Database initialization
-    DB_Link.db_link.initialize()
+    DBLink.db_link.initialize()
     
     parser = argparse.ArgumentParser(description='Face Recognition TCP Server')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
