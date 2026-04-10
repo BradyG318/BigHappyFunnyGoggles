@@ -578,7 +578,7 @@ class FaceCaptureClient:
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
                         # Pre-processing and quality checks 
-                        face_crop, border = get_face_crop(frame, face_landmarks)
+                        face_crop, border = get_face_crop(original_frame, face_landmarks)
                         if face_crop is None: continue
                         
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
