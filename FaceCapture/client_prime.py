@@ -65,6 +65,7 @@ max_num_people = 2
 display_on = True
 ui_transparency = 1.0
 font_scale = .55
+max_changed = False
 
 # Utility functions 
 def get_pose_quality(landmarks) -> float:
@@ -255,7 +256,10 @@ class FaceCaptureClient:
                     try:
                         settings = json.loads(decoded)
                         global max_num_people
-                        max_num_people = settings["numPeople"]
+                        if(max_num_people != settings["numPeople"]):
+                            max_num_people = settings["numPeople"]
+                            global max_changed
+                            max_changed = True
                         global display_on
                         display_on = settings["showDisplay"]
                         global ui_transparency
@@ -691,7 +695,13 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-                
+                if (max_changed):
+                    break
+        
+        if(max_changed):
+            max_changed = False
+            client.run()
+
         #Cleanup but Bluetooth
         self._stop_bluetooth()
 
