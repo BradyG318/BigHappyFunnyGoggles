@@ -43,8 +43,8 @@ class FaceRecognitionServer:
         self.port = port
         
         # Load SSL context with server certificate and key
-        #self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        #self.ssl_context.load_cert_chain(certfile='server.crt')# keyfile='server.key')
+        self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
         
         # TCP Server
         self.server_socket = None
@@ -83,11 +83,11 @@ class FaceRecognitionServer:
                     client_socket, client_addr = self.server_socket.accept()
                     self.logger.info(f"Accepted connection from {client_addr}")
                     
-                    #ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
+                    ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
                     self.logger.info(f"SSL handshake completed with {client_addr}")
                     
                     # Handle connection
-                    self._accept_connection(client_socket, client_addr)
+                    self._accept_connection(ssl_client_socket, client_addr)
                     
                     # Connection closed, wait for new one
                     self.logger.info("Connection closed, waiting for new connection...")
@@ -321,8 +321,11 @@ class FaceRecognitionServer:
             self.logger.debug(f"Recognizing {num_crops} face(s)")
             
             if num_crops == 1:
+                # Resize crop to 160 * 160 for Facenet512
+                face_crop = cv2.resize(face_crops[0], (160, 160), interpolation=cv2.INTER_CUBIC)
+                
                 # Apply lighting normalization to single crop
-                processed_face_crop = self.conservative_lighting_normalization(face_crops[0])
+                processed_face_crop = self.conservative_lighting_normalization(face_crop)
                 
                 # Get encoding for single face
                 embedding = self.get_deepface_embedding(processed_face_crop)
@@ -333,6 +336,9 @@ class FaceRecognitionServer:
                 # Get encodings for multiple faces and average them
                 embeddings = []
                 for face_crop in face_crops:
+                    # Resize crop to 160 * 160 for Facenet512
+                    face_crop = cv2.resize(face_crop, (160, 160), interpolation=cv2.INTER_CUBIC)
+                    
                     # Apply lighting normalization to all crops
                     processed_face_crop = self.conservative_lighting_normalization(face_crop)
                     
@@ -348,7 +354,7 @@ class FaceRecognitionServer:
             
             if embedding is None:
                 self.logger.info("No valid embedding generated for face")
-                return None
+                return None, None
             
             # Check against recent IDs first if available
             if recent_ids[0] is not None:
@@ -360,7 +366,7 @@ class FaceRecognitionServer:
             
             embedding_list = embedding.tolist() if embedding is not None else None
             if embedding_list is None:
-                return None
+                return None, None
                 
             match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:
