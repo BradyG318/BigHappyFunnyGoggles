@@ -26,7 +26,7 @@ class FaceRecognitionServer:
     DEEPFACE_MODEL = 'Facenet512'
 
     # Recognition Threshold 
-    RECOGNITION_THRESHOLD = 0.72
+    RECOGNITION_THRESHOLD = 0.65
     
     # To avoid duplicate tracking in one session TODO: implement
     currently_tracked_faces = set()
@@ -43,8 +43,8 @@ class FaceRecognitionServer:
         self.port = port
         
         # Load SSL context with server certificate and key
-        self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
+        #self.ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        #self.ssl_context.load_cert_chain(certfile='server.crt', keyfile='server.key')
         
         # TCP Server
         self.server_socket = None
@@ -83,11 +83,13 @@ class FaceRecognitionServer:
                     client_socket, client_addr = self.server_socket.accept()
                     self.logger.info(f"Accepted connection from {client_addr}")
                     
-                    ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
-                    self.logger.info(f"SSL handshake completed with {client_addr}")
+                    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+                    
+                    #ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
+                    #self.logger.info(f"SSL handshake completed with {client_addr}")
                     
                     # Handle connection
-                    self._accept_connection(ssl_client_socket, client_addr)
+                    self._accept_connection(client_socket, client_addr)
                     
                     # Connection closed, wait for new one
                     self.logger.info("Connection closed, waiting for new connection...")
@@ -185,7 +187,7 @@ class FaceRecognitionServer:
             
             if packet is None:
                 self.logger.warning(f"Invalid packet from {client_addr}")
-                return None, None
+                return None, None, None
             
             # Extract data
             face_crops = packet.face_crops
@@ -202,7 +204,7 @@ class FaceRecognitionServer:
             
         except Exception as e:
             self.logger.error(f"Packet processing error from {client_addr}: {e}")
-            return None, None, None
+            return seq_num, None, None
 
     def _stop(self):
         """Stop server gracefully"""
@@ -229,9 +231,8 @@ class FaceRecognitionServer:
             #face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
             
             #DEBUG show image
-            cv2.imshow("Face Crop", face_crop)
-            
-            cv2.waitKey(1)
+            #cv2.imshow("Face Crop", face_crop)
+            #cv2.waitKey(1)
             
             embeddings = DeepFace.represent(
                 img_path=face_crop, 
@@ -313,8 +314,11 @@ class FaceRecognitionServer:
         Returns recognized face ID or None
         """
         similarity = 0.0
+        match_id = None
+        embedding = None
         
         try:
+            
             # Check number of faces sent (check ID vs Capture)
             num_crops = len(face_crops)
             
@@ -329,12 +333,14 @@ class FaceRecognitionServer:
                 
                 # Get encoding for single face
                 embedding = self.get_deepface_embedding(processed_face_crop)
+                
                 if embedding is not None:
                     embedding = embedding / np.linalg.norm(embedding)
                 
             elif num_crops > 1:
                 # Get encodings for multiple faces and average them
                 embeddings = []
+                
                 for face_crop in face_crops:
                     # Resize crop to 160 * 160 for Facenet512
                     face_crop = cv2.resize(face_crop, (160, 160), interpolation=cv2.INTER_CUBIC)
@@ -357,7 +363,7 @@ class FaceRecognitionServer:
                 return None, None
             
             # Check against recent IDs first if available
-            if recent_ids[0] is not None:
+            if recent_ids[0] is not None and num_crops == 1: # Only do recent ID check for ID CASE with 1 crop, otherwise we might be checking the wrong face against recent IDs
                 match_id, similarity = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
 
                 if match_id is not None and similarity >= self.RECOGNITION_THRESHOLD:
@@ -385,21 +391,30 @@ class FaceRecognitionServer:
     def send_result(self, client_socket, seq_num, result, similarity):
         """Send recognition result back to client by IDPacket"""
         try:
-            # Create IDPacket based on result
-            if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD and result is not None:
-                db_info = DB_Link.db_link.get_info_by_id(result)
-                
-                if db_info is None: # Handle case where ID exists but no info found from DB
-                    db_info = {"fullname": "Unknown", "age": 0}
-                
-                response_packet = IDPacket(True, seq_num, result, similarity, fullname=db_info.get("fullname"), age=db_info.get("age"))
+            if seq_num is None or result is None or similarity is None:
+                response_packet = IDPacket(False, seq_num if seq_num is not None else 0, 0, 0.0, "Unknown", 0)
+                response_data = response_packet.serialize()
+                client_socket.sendall(response_data)
+                self.logger.info(f"Sent failure response for seq_num {seq_num} due to invalid recognition result")
+            
             else:
-                response_packet = IDPacket(False, seq_num, result, similarity)
-            
-            response_data = response_packet.serialize()
-            client_socket.sendall(response_data)
-            
-            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
+                # Get additional info from DB if ID recognized for UI display
+                if result is not None:
+                    db_info = DB_Link.db_link.get_info_by_id(result)
+                    
+                    if db_info is None: # Handle case where ID exists but no info found from DB
+                        db_info = {"fullname": "Unknown", "age": 0}
+                
+                # Create IDPacket based on result
+                if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD:
+                    response_packet = IDPacket(True, seq_num, result, similarity, fullname=db_info.get("fullname"), age=db_info.get("age"))
+                else:
+                    response_packet = IDPacket(False, seq_num, result, similarity, fullname=db_info.get("fullname") if result is not None else "Unknown", age=db_info.get("age") if result is not None else 0)
+                
+                response_data = response_packet.serialize()
+                client_socket.sendall(response_data)
+                
+                self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
             
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")

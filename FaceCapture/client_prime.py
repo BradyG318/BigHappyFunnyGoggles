@@ -14,7 +14,6 @@ import threading
 import queue
 import ssl
 import json
-import BluetoothSettingsPacket as bst
 
 warnings.filterwarnings("ignore")
 
@@ -26,6 +25,7 @@ from IDPacket import IDPacket
 from face_tracker import SimpleFaceTracker
 
 try:
+    import BluetoothSettingsPacket as bst
     import bluetooth #Pi Crap
 except ImportError:
     bluetooth = None
@@ -344,6 +344,10 @@ class FaceCaptureClient:
                 break #Exit the thread if there is no task
             track_id, packet = task
 
+            if self.tracker.get_active_tracks().get(track_id).locked_id: # If ID is locked, skip sending to server (already have a confident match)
+                self.request_queue.task_done()
+                continue
+            
             response = self._send_packet_and_receive_id(packet)
             current_time = time.time()
 
@@ -354,6 +358,9 @@ class FaceCaptureClient:
                 if response:
                     if response.success:
                         track.server_id = response.face_id
+                        track.confidence = response.similarity
+                        track.locked_id = True # Lock the ID on successful recognition to prevent changes on future frames
+                        #print("LOCKING ID DUE TO SUCCESSFUL RECOGNITION")
                         track.pending_seq_num = None
                         track.recognition_cooldown = 0.0
                         track.failed_attempts = 0
@@ -364,6 +371,7 @@ class FaceCaptureClient:
                         
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
+                        
                         if ENABLEBT and track.bt_sent_for_id != response.face_id:
                             bt_packet = BluetoothIdentityPacket(
                                 track_id=track_id,
@@ -374,6 +382,7 @@ class FaceCaptureClient:
                             )
                             self.bt_send(bt_packet.serialize())
                             track.bt_sent_for_id = response.face_id
+                    
                     else:
                         track.failed_attempts += 1
                         
@@ -385,7 +394,17 @@ class FaceCaptureClient:
                             
                         track.recognition_cooldown = current_time + cooldown
                         
-                        track.server_id = None
+                        # Adding closest face and similarity to UI
+                        if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
+                            ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
+                        
+                        # Only lock id if valid face id twice in a row
+                        if track.server_id != 0 and track.server_id is not None and track.server_id == response.face_id: # if same result twice in a row, lock in anyways
+                            #print("LOCKING ID DUE TO CONSISTENT RESULTS")
+                            track.locked_id = True
+                        
+                        track.server_id = response.face_id
+                        track.confidence = response.similarity
                         track.pending_seq_num = None
 
                         if track.buffer_full:
@@ -394,7 +413,7 @@ class FaceCaptureClient:
 
                         else:
                             track.recognition_cooldown = current_time + 1.0
-                            track.pending_seq_num = None
+                            
             self.request_queue.task_done()
 
     def bt_send(self, data: bytes):
@@ -464,11 +483,11 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            context.check_hostname = False  # Disable hostname checking
-            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
-            print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
+            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            # context.check_hostname = False  # Disable hostname checking
+            #self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            #print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
             print(f"[ERROR] Failed to connect to server: {e}")
@@ -547,7 +566,7 @@ class FaceCaptureClient:
             max_num_faces=max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
-            min_detection_confidence=0.3,
+            min_detection_confidence=0.4,
             min_tracking_confidence=0.01
         ) as face_mesh:
 
@@ -626,8 +645,10 @@ class FaceCaptureClient:
                         
                         current_time = time.time()
                         
+                        can_send = True
+                        
                         # If already recognized, just display
-                        if track.server_id is not None and display_on:
+                        if track.server_id is not None and track.server_id != 0 and display_on:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
@@ -636,9 +657,10 @@ class FaceCaptureClient:
                             if db_info is None or db_info.get("age") == 0 or db_info.get("fullname") == "": # Handle case where ID exists but no info found from DB
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
-                            nameLine = f"Name: {db_info.get('fullname')}"
-                            ageLine = f"Age: {db_info.get('age')}"
-                            idLine = f"ID: #{display_id}"
+                            confidenceLine = f"Confidence: {track.confidence:.2f}" if track.confidence is not None else "Confidence: N/A"
+                            nameLine = f"Name: {db_info.get('fullname')}" if track.locked_id else f"Likely Name: {db_info.get('fullname')}"
+                            ageLine = f"Age: {db_info.get('age')}" if track.locked_id else f"Likely Age: {db_info.get('age')}"
+                            idLine = f"ID: #{display_id}" if track.locked_id else f"Likely ID: {display_id}" # Show ~ if ID is not locked (low confidence or multiple different results)
 
                             ##UI Crapola
                             color = (0, 255, 0)  # Green
@@ -646,66 +668,78 @@ class FaceCaptureClient:
                             
                             cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
+                            cv2.putText(original_frame, confidenceLine, (x1, y1 - 60),
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             cv2.putText(original_frame, nameLine, (x1, y1 - 42),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             cv2.putText(original_frame, ageLine, (x1, y1 - 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
                             cv2.putText(original_frame, idLine, (x1, y1 - 6),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            continue  # Skip server query for this face
+                            
+                            if track.locked_id:
+                                continue  # Skip server query for this face
 
                         # Check if we're in cooldown after a failed attempt
                         elif current_time < track.recognition_cooldown:
                             cooldown_left = track.recognition_cooldown - current_time
-                            status = f"Retry in {cooldown_left:.1f}s"
-                            color = (255, 165, 0)  # Orange
+                            if track.server_id is None or track.server_id == 0:
+                                status = f"Retry in {cooldown_left:.1f}s"
+                                color = (255, 165, 0)  # Orange
+                            can_send = False
                            
                         # Check if there's a pending request
-                        elif track.pending_seq_num is not None:
-                            status = "Recognizing..."
-                            color = (0, 255, 255)  # Yellow
+                        elif track.pending_seq_num is not None or (current_time - track.last_recognition_time) < 0.5: # If we recently sent a request, wait for response before sending another (also prevents multiple sends on same frame)
+                            if track.server_id is None or track.server_id == 0:
+                                status = "Recognizing..."
+                                color = (0, 255, 255)  # Yellow
+                            can_send = False
                         
                         # Check quality before sending
                         elif not current_quality:
-                            status = "Poor Quality"
-                            color = (0, 0, 255)  # Red
-                            
-                        else:
-                            #First attempt or no recent IDs (ID CASE with 10 crops)
+                            if track.server_id is None or track.server_id == 0:
+                                status = "Poor Quality"
+                                color = (0, 0, 255)  # Red
+                            can_send = False
+                        
+                        if can_send and not track.locked_id:
+                            # First attempt or no recent IDs (ID CASE with 10 crops)
                             if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): 
-                                if not track.buffer_full:
+                                if not track.buffer_full and current_crop is not None:
                                     track.crop_buffer.append(current_crop)
                                     if len(track.crop_buffer) >= BEST_SAMPLES_TO_AVERAGE:
                                         track.buffer_full = True
-                                    else:
+                                    elif track.server_id is None or track.server_id == 0:
                                         #Still gathering crops, set status and skip sending
                                         status = f"Gathering {len(track.crop_buffer)}/{BEST_SAMPLES_TO_AVERAGE}"
                                         color = (255, 255, 0)  # Cyan
-                                        
+                                            
                                 #If the buffer just filled up, prep the packet and send
                                 if track.buffer_full:
-                                    packet = FacePacket(self.seq_num, track.crop_buffer, [None]*5)
+                                    packet = FacePacket(self.seq_num, list(track.crop_buffer), [None]*5)
                                     
                                     track.pending_seq_num = self.seq_num  
                                     self.request_queue.put((track_id, packet))
                                     self.seq_num += 1
                                     
-                                    status = "Recognizing..."
-                                    color = (0, 255, 255)  # Yellow
-                                    
+                                    if track.server_id is None or track.server_id == 0:  
+                                        status = "Recognizing..."
+                                        color = (0, 255, 255)  # Yellow
+                                        
                             #First attempt failed or recent IDs available (RE-ID CASE with 1 crop + recent IDs)
                             else:
                                 packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
-                                
+                                    
                                 track.pending_seq_num = self.seq_num
                                 self.request_queue.put((track_id, packet))
                                 self.seq_num += 1
                                 
-                                status = "Recognizing..."
-                                color = (0, 255, 255)  # Yellow
+                                if track.server_id is None or track.server_id == 0:  
+                                    status = "Recognizing..."
+                                    color = (0, 255, 255)  # Yellow  
 
                         # Draw the box and status
-                        if(display_on):
+                        if track.server_id is None or track.server_id == 0 and display_on:
                             cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(original_frame, status, (current_box[0], current_box[1]-10), 

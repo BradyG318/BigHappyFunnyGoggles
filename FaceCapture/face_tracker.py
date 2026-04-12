@@ -83,6 +83,8 @@ class Track:
         # Recognition fields
         self.server_id = None
         self.pending_seq_num = None
+        self.confidence = 0.0
+        self.locked_id = False
         self.last_recognition_time = 0
         self.recognition_cooldown = 0
         self.failed_attempts = 0
