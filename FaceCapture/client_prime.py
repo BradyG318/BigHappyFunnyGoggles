@@ -483,11 +483,11 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            # context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            # context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            # context.check_hostname = False  # Disable hostname checking
-            #self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
-            #print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
+            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            context.check_hostname = False  # Disable hostname checking
+            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:
             print(f"[ERROR] Failed to connect to server: {e}")
@@ -702,7 +702,11 @@ class FaceCaptureClient:
                                 color = (0, 0, 255)  # Red
                             can_send = False
                         
-                        if can_send and not track.locked_id:
+                        # prevent queuing multiple packets for the same track before receiving a response (also handles case where face is detected but then lost before response is received, preventing multiple pending packets for the same track)
+                        if track.pending_seq_num is not None:
+                            can_send = False
+                        
+                        if can_send and not track.locked_id:                            
                             # First attempt or no recent IDs (ID CASE with 10 crops)
                             if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): 
                                 if not track.buffer_full and current_crop is not None:
