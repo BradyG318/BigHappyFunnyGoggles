@@ -757,10 +757,11 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-                if (max_changed):
+                
+                if ENABLEBT and max_changed:
                     break
         
-        if(max_changed):
+        if ENABLEBT and max_changed:
             max_changed = False
             client.run()
 

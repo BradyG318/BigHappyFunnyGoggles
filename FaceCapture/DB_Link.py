@@ -34,6 +34,60 @@ class DB_Link:
             loop = self.get_event_loop()
             loop.run_until_complete(self.conn.close())
 
+    def is_connected(self) -> bool:
+        """Synchronous check if connection is alive"""
+        if self.conn is None:
+            return False
+        try:
+            # Run a cheap query to test connection
+            loop = self.get_event_loop()
+            loop.run_until_complete(self.conn.execute('SELECT 1'))
+            return True
+        except Exception:
+            return False
+
+    async def ensure_connection(self):
+        """Ensure a valid database connection exists; reconnect if necessary."""
+        if self.conn is None or self.conn.is_closed():
+            await self._reconnect()
+            return
+
+        # Test connection with a lightweight query
+        try:
+            await self.conn.execute('SELECT 1')
+        except (asyncpg.exceptions.ConnectionDoesNotExistError,
+                asyncpg.exceptions.InterfaceError,
+                ConnectionResetError,
+                BrokenPipeError) as e:
+            print(f"[DB] Connection lost: {e}. Reconnecting...")
+            await self._reconnect()
+        except Exception as e:
+            # Unexpected error – still try to reconnect
+            print(f"[DB] Unexpected connection error: {e}. Reconnecting...")
+            await self._reconnect()
+
+    async def _reconnect(self):
+        """Re-establish database connection with retries."""
+        if self.conn and not self.conn.is_closed():
+            try:
+                await self.conn.close()
+            except Exception:
+                pass
+        self.conn = None
+
+        for attempt in range(1, self._max_reconnect_attempts + 1):
+            try:
+                await self.init_connection()
+                self._reconnect_attempts = 0
+                print("[DB] Reconnected successfully.")
+                return
+            except Exception as e:
+                print(f"[DB] Reconnection attempt {attempt} failed: {e}")
+                if attempt < self._max_reconnect_attempts:
+                    await asyncio.sleep(self._reconnect_delay * attempt)
+                else:
+                    raise RuntimeError(f"Failed to reconnect to database after {self._max_reconnect_attempts} attempts")
+    
     def build_faiss_index(self, vectors_dict: Dict[int, List[float]]):
         """
         Build a FAISS index from all vectors stored in the database.
@@ -100,6 +154,8 @@ class DB_Link:
     
     async def get_all_vectors_async(self) -> Dict[int, List[float]]:
         """Get all face vectors from database"""
+        await self.ensure_connection()
+        
         rows = await self.conn.fetch('SELECT id, encoding FROM encodings') # change back to 'faces', if needed
         vectors_dict = {}
         for row in rows:
@@ -114,6 +170,8 @@ class DB_Link:
     async def save_face_vector_async(self, id: int, encoding: List[float]) -> bool:
         """Save or update face vector in database"""
         try:
+            await self.ensure_connection()
+            
             # Convert list to pgvector format: [1.0, 2.0, 3.0]
             vector_str = '[' + ','.join(map(str, encoding)) + ']'
 
@@ -129,6 +187,8 @@ class DB_Link:
     async def save_encoding_async(self, encoding: List[float], path: str) -> bool:
         """Save face vector and image url to encodings table"""
         try:
+            await self.ensure_connection()
+            
             # Convert list to pgvector format: [1.0, 2.0, 3.0]
             vector_str = '[' + ','.join(map(str, encoding)) + ']'
 
@@ -144,6 +204,8 @@ class DB_Link:
     async def delete_entry_async(self, id: int) -> bool:
         """Delete a face entry by ID"""
         try:
+            await self.ensure_connection()
+            
             await self.conn.execute('DELETE FROM faces WHERE id = $1', id)
             return True
         except Exception as e:
@@ -164,6 +226,8 @@ class DB_Link:
     async def get_face_image_async(self, id: int) -> Any:
         """Get face image path by ID and return image data"""
         try:
+            await self.ensure_connection()
+            
             row = await self.conn.fetchrow('SELECT path FROM faces WHERE id = $1', id)
             
             if row:
@@ -186,6 +250,8 @@ class DB_Link:
     async def get_info_by_id_async(self, id: int) -> Dict[str, Any]:
         """Get all information for a face entry by ID"""
         try:
+            await self.ensure_connection()
+            
             row = await self.conn.fetchrow('SELECT * FROM info WHERE id = $1', id)
             if row:
                 return dict(row)
@@ -199,6 +265,8 @@ class DB_Link:
     async def get_all_paths_async(self) -> Dict[int, str]:
         """Get all image paths from the database"""
         try:
+            await self.ensure_connection()
+
             rows = await self.conn.fetch('SELECT id, path FROM encodings')
             return {row['id']: row['path'] for row in rows if row['path']}
         except Exception as e:
@@ -208,6 +276,8 @@ class DB_Link:
     async def replace_encoding_async(self, id: int, new_encoding: List[float]) -> bool:
         """Replace an existing encoding by ID"""
         try:
+            await self.ensure_connection()
+            
             vector_str = '[' + ','.join(map(str, new_encoding)) + ']'
             await self.conn.execute('UPDATE encodings SET encoding = $1 WHERE id = $2', vector_str, id)
             return True
