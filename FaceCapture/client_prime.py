@@ -14,6 +14,7 @@ import threading
 import queue
 import ssl
 import json
+import BluetoothSettingsPacket as bst
 
 warnings.filterwarnings("ignore")
 
@@ -25,7 +26,6 @@ from IDPacket import IDPacket
 from face_tracker import SimpleFaceTracker
 
 try:
-    import BluetoothSettingsPacket as bst
     import bluetooth #Pi Crap
 except ImportError:
     bluetooth = None
@@ -37,9 +37,9 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
-camFramerate = 20
+camFramerate = 15
 frameWidth = 1280
 frameHeight = 720
 
@@ -64,30 +64,12 @@ BT_BACKLOG = 1
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
 
-max_num_people = 4
+max_num_people = 2
 display_on = True
 ui_transparency = 1.0
 font_scale = .55
-max_changed = False
 
-# Utility functions
-# Function to preprocess the frame for better face detection
-def preprocess_frame(image):
-    # Reduce compression artifacts
-    #image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
-    
-    # Enhance contrast aggressively for longer range (helps with detection)
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hsv[:,:,2] = cv2.equalizeHist(hsv[:,:,2])   # equalise Value channel
-    image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-    
-    # Scale image up for better detection of smaller faces
-    # scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
-    # height, width = image.shape[:2]
-    # image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
-
-    return image
-
+# Utility functions 
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
     lm = landmarks.landmark
@@ -139,7 +121,7 @@ def get_face_crop(frame: np.ndarray, face_landmarks):
 
     face_crop = frame[top:bottom, left:right]
 
-    #if right - left < 60 or bottom - top < 60: return None, None
+    if right - left < 60 or bottom - top < 60: return None, None
     
     return frame[top:bottom, left:right], [left, top, right, bottom]
 
@@ -158,6 +140,7 @@ class FaceCaptureClient:
         self.cap.set(cv2.CAP_PROP_FPS, camFramerate)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
+
 
         if not self.cap.isOpened():
             raise IOError(f"Error: Could not open camera {CAMERA_INDEX}")
@@ -190,7 +173,6 @@ class FaceCaptureClient:
             print("Bluetooth Disabled Nerd")
 
         self._connect_to_server()
-        
     #Bluetooth Functions
     def _start_bluetooth_server(self):
         """Start an RFCOMM Bluetooth server so the Android app can connect."""
@@ -282,16 +264,17 @@ class FaceCaptureClient:
                     try:
                         settings = json.loads(decoded)
                         global max_num_people
-                        if(max_num_people != settings["numPeople"]):
-                            max_num_people = settings["numPeople"]
-                            global max_changed
-                            max_changed = True
+                        max_num_people = settings["numPeople"]
                         global display_on
                         display_on = settings["showDisplay"]
                         global ui_transparency
                         ui_transparency = settings["uiTransparency"]
                         global font_scale
                         font_scale = settings["fontScale"]
+                        global autoExposeOn
+                        autoExposeOn = settings["autoExposeOn"]
+                        global manualExposure
+                        manualExposure = settings["manualExposure"]
                         print(f"[BT RX] Parsed settings packet: {settings}")
                         
                     except json.JSONDecodeError:
@@ -344,10 +327,6 @@ class FaceCaptureClient:
                 break #Exit the thread if there is no task
             track_id, packet = task
 
-            if self.tracker.get_active_tracks().get(track_id).locked_id: # If ID is locked, skip sending to server (already have a confident match)
-                self.request_queue.task_done()
-                continue
-            
             response = self._send_packet_and_receive_id(packet)
             current_time = time.time()
 
@@ -358,9 +337,6 @@ class FaceCaptureClient:
                 if response:
                     if response.success:
                         track.server_id = response.face_id
-                        track.confidence = response.similarity
-                        track.locked_id = True # Lock the ID on successful recognition to prevent changes on future frames
-                        #print("LOCKING ID DUE TO SUCCESSFUL RECOGNITION")
                         track.pending_seq_num = None
                         track.recognition_cooldown = 0.0
                         track.failed_attempts = 0
@@ -371,7 +347,6 @@ class FaceCaptureClient:
                         
                         if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
                             ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
-                        
                         if ENABLEBT and track.bt_sent_for_id != response.face_id:
                             bt_packet = BluetoothIdentityPacket(
                                 track_id=track_id,
@@ -382,7 +357,6 @@ class FaceCaptureClient:
                             )
                             self.bt_send(bt_packet.serialize())
                             track.bt_sent_for_id = response.face_id
-                    
                     else:
                         track.failed_attempts += 1
                         
@@ -394,17 +368,7 @@ class FaceCaptureClient:
                             
                         track.recognition_cooldown = current_time + cooldown
                         
-                        # Adding closest face and similarity to UI
-                        if ID_INFO.get(response.face_id) is None: # Only store info if we don't already have it for this ID
-                            ID_INFO[response.face_id] = {"fullname": response.fullname, "age": response.age} # Store info for UI display
-                        
-                        # Only lock id if valid face id twice in a row
-                        if track.server_id != 0 and track.server_id is not None and track.server_id == response.face_id: # if same result twice in a row, lock in anyways
-                            #print("LOCKING ID DUE TO CONSISTENT RESULTS")
-                            track.locked_id = True
-                        
-                        track.server_id = response.face_id
-                        track.confidence = response.similarity
+                        track.server_id = None
                         track.pending_seq_num = None
 
                         if track.buffer_full:
@@ -413,8 +377,9 @@ class FaceCaptureClient:
 
                         else:
                             track.recognition_cooldown = current_time + 1.0
-                            
+                            track.pending_seq_num = None
             self.request_queue.task_done()
+
 
     def bt_send(self, data: bytes):
         with self.bt_lock:
@@ -467,7 +432,6 @@ class FaceCaptureClient:
             print(person_data)
         except Exception as e:
             print(f"[BT ERROR] Failed to parse incoming Bluetooth data: {e}")
-            
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
@@ -566,8 +530,8 @@ class FaceCaptureClient:
             max_num_faces=max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
-            min_detection_confidence=0.4,
-            min_tracking_confidence=0.01
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.3
         ) as face_mesh:
 
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
@@ -589,9 +553,6 @@ class FaceCaptureClient:
                 face_crops_for_boxes = []
 
                 # Process frame for face landmarks
-                
-                frame = preprocess_frame(frame)
-                
                 frame.flags.writeable = False
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
@@ -601,7 +562,7 @@ class FaceCaptureClient:
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
                         # Pre-processing and quality checks 
-                        face_crop, border = get_face_crop(original_frame, face_landmarks)
+                        face_crop, border = get_face_crop(frame, face_landmarks)
                         if face_crop is None: continue
                         
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
@@ -645,10 +606,8 @@ class FaceCaptureClient:
                         
                         current_time = time.time()
                         
-                        can_send = True
-                        
                         # If already recognized, just display
-                        if track.server_id is not None and track.server_id != 0 and display_on:
+                        if track.server_id is not None and display_on:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
@@ -657,102 +616,91 @@ class FaceCaptureClient:
                             if db_info is None or db_info.get("age") == 0 or db_info.get("fullname") == "": # Handle case where ID exists but no info found from DB
                                 db_info = {"fullname": "Unknown", "age": "Unknown"}
                             
-                            confidenceLine = f"Confidence: {track.confidence:.2f}" if track.confidence is not None else "Confidence: N/A"
-                            nameLine = f"Name: {db_info.get('fullname')}" if track.locked_id else f"Likely Name: {db_info.get('fullname')}"
-                            ageLine = f"Age: {db_info.get('age')}" if track.locked_id else f"Likely Age: {db_info.get('age')}"
-                            idLine = f"ID: #{display_id}" if track.locked_id else f"Likely ID: {display_id}" # Show ~ if ID is not locked (low confidence or multiple different results)
+                            nameLine = f"Name: {db_info.get('fullname')}"
+                            ageLine = f"Age: {db_info.get('age')}"
+                            idLine = f"ID: #{display_id}"
 
                             ##UI Crapola
                             color = (0, 255, 0)  # Green
                             x1, y1, x2, y2 = current_box
                             
-                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
+                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(original_frame, confidenceLine, (x1, y1 - 60),
+                            cv2.putText(frame, nameLine, (x1, y1 - 42),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            cv2.putText(original_frame, nameLine, (x1, y1 - 42),
+                            cv2.putText(frame, ageLine, (x1, y1 - 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            cv2.putText(original_frame, ageLine, (x1, y1 - 25),
+                            cv2.putText(frame, idLine, (x1, y1 - 6),
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            cv2.putText(original_frame, idLine, (x1, y1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
-                            
-                            if track.locked_id:
-                                continue  # Skip server query for this face
-
+                            continue  # Skip server query for this face
+                        
                         # Check if we're in cooldown after a failed attempt
                         elif current_time < track.recognition_cooldown:
                             cooldown_left = track.recognition_cooldown - current_time
-                            if track.server_id is None or track.server_id == 0:
-                                status = f"Retry in {cooldown_left:.1f}s"
-                                color = (255, 165, 0)  # Orange
-                            can_send = False
+                            status = f"Retry in {cooldown_left:.1f}s"
+                            color = (255, 165, 0)  # Orange
                            
+                        
                         # Check if there's a pending request
-                        elif track.pending_seq_num is not None or (current_time - track.last_recognition_time) < 0.5: # If we recently sent a request, wait for response before sending another (also prevents multiple sends on same frame)
-                            if track.server_id is None or track.server_id == 0:
-                                status = "Recognizing..."
-                                color = (0, 255, 255)  # Yellow
-                            can_send = False
+                        elif track.pending_seq_num is not None:
+                            status = "Recognizing..."
+                            color = (0, 255, 255)  # Yellow
                         
                         # Check quality before sending
                         elif not current_quality:
-                            if track.server_id is None or track.server_id == 0:
-                                status = "Poor Quality"
-                                color = (0, 0, 255)  # Red
-                            can_send = False
-                        
-                        # prevent queuing multiple packets for the same track before receiving a response (also handles case where face is detected but then lost before response is received, preventing multiple pending packets for the same track)
-                        if track.pending_seq_num is not None:
-                            can_send = False
-                        
-                        if can_send and not track.locked_id:                            
-                            # First attempt or no recent IDs (ID CASE with 10 crops)
+                            status = "Poor Quality"
+                            color = (0, 0, 255)  # Red
+                            
+                        else:
+                            #First attempt or no recent IDs (ID CASE with 10 crops)
                             if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): 
-                                if not track.buffer_full and current_crop is not None:
+                                if not track.buffer_full:
                                     track.crop_buffer.append(current_crop)
                                     if len(track.crop_buffer) >= BEST_SAMPLES_TO_AVERAGE:
                                         track.buffer_full = True
-                                    elif track.server_id is None or track.server_id == 0:
+                                    else:
                                         #Still gathering crops, set status and skip sending
                                         status = f"Gathering {len(track.crop_buffer)}/{BEST_SAMPLES_TO_AVERAGE}"
                                         color = (255, 255, 0)  # Cyan
-                                            
+                                        
                                 #If the buffer just filled up, prep the packet and send
                                 if track.buffer_full:
-                                    packet = FacePacket(self.seq_num, list(track.crop_buffer), [None]*5)
+                                    packet = FacePacket(self.seq_num, track.crop_buffer, [None]*5)
                                     
                                     track.pending_seq_num = self.seq_num  
                                     self.request_queue.put((track_id, packet))
                                     self.seq_num += 1
                                     
-                                    if track.server_id is None or track.server_id == 0:  
-                                        status = "Recognizing..."
-                                        color = (0, 255, 255)  # Yellow
-                                        
+                                    status = "Recognizing..."
+                                    color = (0, 255, 255)  # Yellow
+                                    
                             #First attempt failed or recent IDs available (RE-ID CASE with 1 crop + recent IDs)
                             else:
                                 packet = FacePacket(self.seq_num, [current_crop], self.recent_face_ids)
-                                    
+                                
                                 track.pending_seq_num = self.seq_num
                                 self.request_queue.put((track_id, packet))
                                 self.seq_num += 1
                                 
-                                if track.server_id is None or track.server_id == 0:  
-                                    status = "Recognizing..."
-                                    color = (0, 255, 255)  # Yellow  
+                                status = "Recognizing..."
+                                color = (0, 255, 255)  # Yellow
+                        
+                        if(autoExposeOn):
+                            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+                        else:
+                            self.cap.set(cv2.CAP_PROP_EXPOSURE, manualExposure)
 
                         # Draw the box and status
-                        if track.server_id is None or track.server_id == 0 and display_on:
-                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
+                        if(display_on):
+                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(original_frame, status, (current_box[0], current_box[1]-10), 
+                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale + .05, color, 2)
                         
                 # Drawing the frame                
-                if(ui_transparency == 1.0):
-                    cv2.imshow('Face Capture Client (Glasses)', original_frame)
                 
+                if(ui_transparency == 1.0):
+                    cv2.imshow('Face Capture Client (Glasses)', frame)
                 else:
                     combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
                     cv2.imshow('Face Capture Client (Glasses)', combined_frame)
@@ -762,13 +710,6 @@ class FaceCaptureClient:
                 if key == ord('q') or key == 27: 
                     break
                 
-                if ENABLEBT and max_changed:
-                    break
-        
-        if ENABLEBT and max_changed:
-            max_changed = False
-            client.run()
-
         #Cleanup but Bluetooth
         self._stop_bluetooth()
 
