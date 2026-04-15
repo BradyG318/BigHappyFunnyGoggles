@@ -362,8 +362,11 @@ class FaceRecognitionServer:
                 self.logger.info("No valid embedding generated for face")
                 return None, None
             
+            reid_case = False
+            
             # Check against recent IDs first if available
             if recent_ids[0] is not None and num_crops == 1: # Only do recent ID check for ID CASE with 1 crop, otherwise we might be checking the wrong face against recent IDs
+                reid_case = True
                 match_id, similarity = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
 
                 if match_id is not None and similarity >= self.RECOGNITION_THRESHOLD:
@@ -373,11 +376,16 @@ class FaceRecognitionServer:
             embedding_list = embedding.tolist() if embedding is not None else None
             if embedding_list is None:
                 return None, None
-                
+            
+            if reid_case:
+                threshold = self.RECOGNITION_THRESHOLD + 0.05
+            else:
+                threshold = self.RECOGNITION_THRESHOLD
+            
             match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
             if match:
                 match_id, similarity = match
-                if similarity >= self.RECOGNITION_THRESHOLD:
+                if similarity >= threshold:
                     self.logger.info(f"Face recognized as ID #{match_id} (similarity: {similarity})")
                 return match_id, similarity
                 
