@@ -654,9 +654,6 @@ class FaceCaptureClient:
                         else:
                             #First attempt or no recent IDs (ID CASE with 10 crops)
                             if (track.failed_attempts > 0 or self.recent_face_ids[0] is None): 
-<<<<<<< HEAD
-                                if not track.buffer_full:
-=======
                                 if not track.buffer_full and current_crop is not None:
                                     # Apply CLAHE prior to sending to server for better recognition (especially in longer range where faces are smaller and quality is poorer)                                    
                                     current_crop = cv2.cvtColor(current_crop, cv2.COLOR_BGR2LAB)
@@ -665,8 +662,7 @@ class FaceCaptureClient:
 
                                     # Converting image from LAB Color model to BGR color space
                                     current_crop = cv2.cvtColor(current_crop, cv2.COLOR_Lab2BGR)
-                                            
->>>>>>> 0bcd0f15517917e2927ae809bdce55b71af0e8ba
+
                                     track.crop_buffer.append(current_crop)
                                     if len(track.crop_buffer) >= BEST_SAMPLES_TO_AVERAGE:
                                         track.buffer_full = True

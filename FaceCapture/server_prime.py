@@ -26,7 +26,7 @@ class FaceRecognitionServer:
     DEEPFACE_MODEL = 'Facenet512'
 
     # Recognition Threshold 
-    RECOGNITION_THRESHOLD = 0.72
+    RECOGNITION_THRESHOLD = 0.65
     
     # To avoid duplicate tracking in one session TODO: implement
     currently_tracked_faces = set()
@@ -353,12 +353,8 @@ class FaceRecognitionServer:
             reid_case = False
             
             # Check against recent IDs first if available
-<<<<<<< HEAD
-            if recent_ids[0] is not None:
-=======
             if recent_ids[0] is not None and num_crops == 1: # Only do recent ID check for ID CASE with 1 crop, otherwise we might be checking the wrong face against recent IDs
                 reid_case = True
->>>>>>> 0bcd0f15517917e2927ae809bdce55b71af0e8ba
                 match_id, similarity = self.recognize_by_range(embedding, recent_ids) #TODO: we could later consider adding a bonus for recent ids ONLY IN capture case re-id where they previously failed
 
                 if match_id is not None and similarity >= self.RECOGNITION_THRESHOLD:
