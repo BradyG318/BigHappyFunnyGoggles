@@ -126,17 +126,18 @@ class DB_Link:
             print(f"Error saving vector to database: {e}")
             return False
         
-    async def save_encoding_async(self, encoding: List[float], path: str) -> bool:
+    async def save_encoding_async(self, encoding: List[float], path: str = None) -> bool:
         """Save face vector and image url to encodings table"""
         try:
             # Convert list to pgvector format: [1.0, 2.0, 3.0]
             vector_str = '[' + ','.join(map(str, encoding)) + ']'
 
+            # Note: path is not being saved here, but can be added if needed
             await self.conn.execute('''
-                INSERT INTO encodings (encoding, path) 
-                VALUES ($1, $2)
-            ''', vector_str, path)
-            return True
+                INSERT INTO demo (encoding) 
+                VALUES ($1)
+            ''', vector_str)
+            return True, await self.conn.fetchval('SELECT currval(pg_get_serial_sequence(\'demo\', \'id\'))')
         except Exception as e:
             print(f"Error saving vector to database: {e}")
             return False
@@ -195,7 +196,20 @@ class DB_Link:
         except Exception as e:
             print(f"Error retrieving info from database: {e}")
             return {}
-        
+    
+    async def save_info_async(self, id: int, fullname: str, age:int) -> bool:
+        """Save or update information for a face entry by ID"""
+        try:
+            await self.conn.execute('''
+                INSERT INTO demo_info (id, fullname, age) 
+                VALUES ($1, $2, $3)
+                ON CONFLICT (id) DO UPDATE SET fullname = EXCLUDED.fullname, age = EXCLUDED.age
+            ''', id, fullname, age)
+            return True
+        except Exception as e:
+            print(f"Error saving info to database: {e}")
+            return False
+    
     async def get_all_paths_async(self) -> Dict[int, str]:
         """Get all image paths from the database"""
         try:
@@ -232,7 +246,7 @@ class DB_Link:
         loop = self.get_event_loop()
         return loop.run_until_complete(self.save_face_vector_async(face_id, vector))
 
-    def save_encoding(self, encoding: List[float], path: str) -> bool:
+    def save_encoding(self, encoding: List[float], path: str = None) -> bool:
         """Synchronous wrapper to save encoding and path"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.save_encoding_async(encoding, path))
@@ -251,6 +265,11 @@ class DB_Link:
         """Synchronous wrapper to get image data by id"""
         loop = self.get_event_loop()
         return loop.run_until_complete(self.get_face_image_async(id))
+    
+    def save_info(self, id: int, fullname: str, age:int) -> bool:
+        """Synchronous wrapper to save info by id"""
+        loop = self.get_event_loop()
+        return loop.run_until_complete(self.save_info_async(id, fullname, age))
     
     def get_info_by_id(self, id: int) -> Dict[str, Any]:
         """Synchronous wrapper to get info by id"""
