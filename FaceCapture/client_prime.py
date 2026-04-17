@@ -64,11 +64,6 @@ BT_BACKLOG = 1
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
 
-max_num_people = 2
-display_on = True
-ui_transparency = 1.0
-font_scale = .55
-
 # Utility functions 
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
@@ -171,6 +166,13 @@ class FaceCaptureClient:
             self._start_bluetooth_server()
         else:
             print("Bluetooth Disabled Nerd")
+        
+        self.max_num_people = 2
+        self.display_on = True
+        self.ui_transparency = 1.0
+        self.font_scale = .55
+        self.autoExposeOn = True
+        self.manualExposure = 10.0
 
         self._connect_to_server()
     #Bluetooth Functions
@@ -263,18 +265,18 @@ class FaceCaptureClient:
 
                     try:
                         settings = json.loads(decoded)
-                        global max_num_people
-                        max_num_people = settings["numPeople"]
-                        global display_on
-                        display_on = settings["showDisplay"]
-                        global ui_transparency
-                        ui_transparency = settings["uiTransparency"]
-                        global font_scale
-                        font_scale = settings["fontScale"]
-                        global autoExposeOn
-                        autoExposeOn = settings["autoExposeOn"]
-                        global manualExposure
-                        manualExposure = settings["manualExposure"]
+                        #global max_num_people
+                        self.max_num_people = settings["numPeople"]
+                        #global display_on
+                        self.display_on = settings["showDisplay"]
+                        #global ui_transparency
+                        self.ui_transparency = settings["uiTransparency"]
+                        #global font_scale
+                        self.font_scale = settings["fontScale"]
+                        #global autoExposeOn
+                        self.autoExposeOn = settings["autoExposeOn"]
+                        #global manualExposure
+                        self.manualExposure = settings["manualExposure"]
                         print(f"[BT RX] Parsed settings packet: {settings}")
                         
                     except json.JSONDecodeError:
@@ -527,7 +529,7 @@ class FaceCaptureClient:
         """Main loop for face detection, quality check, and server communication."""
         
         with mp_face_mesh.FaceMesh(
-            max_num_faces=max_num_people,
+            max_num_faces=self.max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
             min_detection_confidence=0.5,
@@ -607,7 +609,7 @@ class FaceCaptureClient:
                         current_time = time.time()
                         
                         # If already recognized, just display
-                        if track.server_id is not None and display_on:
+                        if track.server_id is not None and self.display_on:
                             display_id = track.server_id
                             
                             # Get info related to this ID from the database
@@ -627,11 +629,11 @@ class FaceCaptureClient:
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(frame, nameLine, (x1, y1 - 42),
-                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
                             cv2.putText(frame, ageLine, (x1, y1 - 25),
-                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
                             cv2.putText(frame, idLine, (x1, y1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
                             continue  # Skip server query for this face
                         
                         # Check if we're in cooldown after a failed attempt
@@ -698,24 +700,24 @@ class FaceCaptureClient:
                                 status = "Recognizing..."
                                 color = (0, 255, 255)  # Yellow
                         
-                        if(autoExposeOn):
+                        if(self.autoExposeOn):
                             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
                         else:
-                            self.cap.set(cv2.CAP_PROP_EXPOSURE, manualExposure)
+                            self.cap.set(cv2.CAP_PROP_EXPOSURE, self.manualExposure)
 
                         # Draw the box and status
-                        if(display_on):
+                        if(self.display_on):
                             cv2.rectangle(frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
                             cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale + .05, color, 2)
+                                    cv2.FONT_HERSHEY_SIMPLEX, self.font_scale + .05, color, 2)
                         
                 # Drawing the frame                
                 
-                if(ui_transparency == 1.0):
+                if(self.ui_transparency == 1.0):
                     cv2.imshow('Face Capture Client (Glasses)', frame)
                 else:
-                    combined_frame = cv2.addWeighted(original_frame,1-ui_transparency,frame,ui_transparency,0)
+                    combined_frame = cv2.addWeighted(original_frame,1-self.ui_transparency,frame,self.ui_transparency,0)
                     cv2.imshow('Face Capture Client (Glasses)', combined_frame)
                 
                 # Handle keyboard inputs (only for quitting)
