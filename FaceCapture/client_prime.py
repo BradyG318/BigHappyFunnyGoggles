@@ -37,7 +37,7 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
 frameWidth = 1280
@@ -53,8 +53,8 @@ BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
 mp_face_mesh = mp.solutions.face_mesh
 
 # Pose/Quality Thresholds
-POSE_QUALITY_THRESHOLD = 0.89
-SHARPNESS_THRESHOLD = 50.0
+POSE_QUALITY_THRESHOLD = 0.87
+SHARPNESS_THRESHOLD = 30.0
 
 # Bluetooth Consts
 BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
@@ -116,7 +116,7 @@ def get_face_crop(frame: np.ndarray, face_landmarks):
 
     face_crop = frame[top:bottom, left:right]
 
-    if right - left < 60 or bottom - top < 60: return None, None
+    #if right - left < 60 or bottom - top < 60: return None, None
     
     return frame[top:bottom, left:right], [left, top, right, bottom]
 
@@ -575,6 +575,12 @@ class FaceCaptureClient:
                             
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD                          
                         is_pose_ok = pose_score >= POSE_QUALITY_THRESHOLD
+                        
+                        # if not is_sharp_enough:
+                        #     print("no sharp")
+                            
+                        # if not is_pose_ok:
+                        #     print("no pose")
                         
                         # Always append the most recent box for tracking
                         current_frame_boxes.append(track_box)
