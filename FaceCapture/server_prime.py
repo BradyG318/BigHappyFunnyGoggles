@@ -185,7 +185,7 @@ class FaceRecognitionServer:
             
             if packet is None:
                 self.logger.warning(f"Invalid packet from {client_addr}")
-                return None, None
+                return None, None, None
             
             # Extract data
             face_crops = packet.face_crops
@@ -202,7 +202,7 @@ class FaceRecognitionServer:
             
         except Exception as e:
             self.logger.error(f"Packet processing error from {client_addr}: {e}")
-            return None, None, None
+            return seq_num, None, None
 
     def _stop(self):
         """Stop server gracefully"""
@@ -230,7 +230,6 @@ class FaceRecognitionServer:
             
             #DEBUG show image
             # cv2.imshow("Face Crop", face_crop)
-            
             # cv2.waitKey(1)
             
             embeddings = DeepFace.represent(
@@ -313,6 +312,8 @@ class FaceRecognitionServer:
         Returns recognized face ID or None
         """
         similarity = 0.0
+        match_id = None
+        embedding = None
         
         try:
             # Check number of faces sent (check ID vs Capture)
@@ -394,21 +395,32 @@ class FaceRecognitionServer:
         """Send recognition result back to client by IDPacket"""
         try:
             # Create IDPacket based on result
-            if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD and result is not None:
-                db_info = DB_Link.db_link.get_info_by_id(result)
-                
-                if db_info is None: # Handle case where ID exists but no info found from DB
-                    db_info = {"fullname": "Unknown", "age": 0}
-                
-                response_packet = IDPacket(True, seq_num, result, similarity, fullname=db_info.get("fullname"), age=db_info.get("age"))
+            if seq_num is None or result is None or similarity is None:
+                response_packet = IDPacket(False, seq_num if seq_num is not None else 0, 0, 0.0, "Unknown", 0)
+                response_data = response_packet.serialize()
+                client_socket.sendall(response_data)
+                self.logger.info(f"Sent failure response for seq_num {seq_num} due to invalid recognition result")
+            
             else:
-                response_packet = IDPacket(False, seq_num, result, similarity)
-            
-            response_data = response_packet.serialize()
-            client_socket.sendall(response_data)
-            
-            self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
-            
+                # Get additional info from DB if ID recognized for UI display
+                if result is not None:
+                    db_info = DB_Link.db_link.get_info_by_id(result)
+                    
+                    if db_info is None: # Handle case where ID exists but no info found from DB
+                        db_info = {"fullname": "Unknown", "age": 0}
+
+                # Create IDPacket based on result
+                if similarity is not None and similarity >= self.RECOGNITION_THRESHOLD:
+                    response_packet = IDPacket(True, seq_num, result, similarity, fullname=db_info.get("fullname"), age=db_info.get("age"))
+                else:
+                    response_packet = IDPacket(False, seq_num, result, similarity, fullname=db_info.get("fullname") if result is not None else "Unknown", age=db_info.get("age") if result is not None else 0)
+
+                    response_data = response_packet.serialize()
+                
+                client_socket.sendall(response_data)
+                
+                self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
+        
         except Exception as e:
             self.logger.error(f"Failed to send response: {e}")
     
