@@ -53,8 +53,8 @@ BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
 mp_face_mesh = mp.solutions.face_mesh
 
 # Pose/Quality Thresholds
-POSE_QUALITY_THRESHOLD = 0.87
-SHARPNESS_THRESHOLD = 30.0
+POSE_QUALITY_THRESHOLD = 0.0
+SHARPNESS_THRESHOLD = 0.0
 
 # Bluetooth Consts
 BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
@@ -64,7 +64,23 @@ BT_BACKLOG = 1
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
 ID_INFO = {} # maybe move this to track object eventually
 
-# Utility functions 
+# Utility functions
+def preprocess_frame(image):
+    # Reduce compression artifacts
+    #image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
+    
+    # Enhance contrast aggressively for longer range (helps with detection)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hsv[:,:,2] = cv2.equalizeHist(hsv[:,:,2])   # equalise Value channel
+    image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    
+    # Scale image up for better detection of smaller faces
+    # scale_factor = 1.5  # Increase this if needed (1.5 = 150% size)
+    # height, width = image.shape[:2]
+    # image = cv2.resize(image, (int(width * scale_factor), int(height * scale_factor)))
+
+    return image
+
 def get_pose_quality(landmarks) -> float:
     """Robust score (0.0 to 1.0) checking Roll, Yaw, and Pitch."""
     lm = landmarks.landmark
@@ -89,7 +105,7 @@ def get_pose_quality(landmarks) -> float:
     return score
 
 def get_image_sharpness(image: np.ndarray) -> float:
-    if image is None or image.size == 0: return 0.0
+    #if image is None or image.size == 0: return 0.0
     
     """Returns the variance of the Laplacian (sharpness score)."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -551,8 +567,8 @@ class FaceCaptureClient:
             max_num_faces=self.max_num_people,
             refine_landmarks=True,
             static_image_mode=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.3
+            min_detection_confidence=0.4,
+            min_tracking_confidence=0.01
         ) as face_mesh:
 
             print(f"Client running. Sending face data to {self.host}:{self.port}...")
@@ -567,6 +583,8 @@ class FaceCaptureClient:
                 success, frame = self.cap.read()
                 if not success: continue
                 original_frame = frame.copy()
+
+                frame = preprocess_frame(frame)
 
                 # Initialize current frame data lists
                 current_frame_boxes = []
@@ -583,7 +601,7 @@ class FaceCaptureClient:
                 if results.multi_face_landmarks:
                     for face_landmarks in results.multi_face_landmarks:
                         # Pre-processing and quality checks 
-                        face_crop, border = get_face_crop(frame, face_landmarks)
+                        face_crop, border = get_face_crop(original_frame, face_landmarks)
                         if face_crop is None: continue
                         
                         track_box = (border[0], border[1], border[2], border[3])  # (x1, y1, x2, y2)
@@ -594,11 +612,11 @@ class FaceCaptureClient:
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD                          
                         is_pose_ok = pose_score >= POSE_QUALITY_THRESHOLD
                         
-                        # if not is_sharp_enough:
-                        #     print("no sharp")
+                        if not is_sharp_enough:
+                            print("no sharp")
                             
-                        # if not is_pose_ok:
-                        #     print("no pose")
+                        if not is_pose_ok:
+                            print("no pose")
                         
                         # Always append the most recent box for tracking
                         current_frame_boxes.append(track_box)
@@ -654,15 +672,15 @@ class FaceCaptureClient:
                             color = (0, 255, 0)  # Green
                             x1, y1, x2, y2 = current_box
                             
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
+                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, confidenceLine, (x1, y1 - 60),
+                            cv2.putText(original_frame, confidenceLine, (x1, y1 - 60),
                                     cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
-                            cv2.putText(frame, nameLine, (x1, y1 - 42),
+                            cv2.putText(original_frame, nameLine, (x1, y1 - 42),
                                     cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
-                            cv2.putText(frame, ageLine, (x1, y1 - 25),
+                            cv2.putText(original_frame, ageLine, (x1, y1 - 25),
                                     cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
-                            cv2.putText(frame, idLine, (x1, y1 - 6),
+                            cv2.putText(original_frame, idLine, (x1, y1 - 6),
                                     cv2.FONT_HERSHEY_SIMPLEX, self.font_scale, color, 2)
                             
                             if track.locked_id:
@@ -747,15 +765,15 @@ class FaceCaptureClient:
 
                         # Draw the box and status
                         if track.server_id is None or track.server_id == 0 and self.display_on:
-                            cv2.rectangle(frame, (current_box[0], current_box[1]), 
+                            cv2.rectangle(original_frame, (current_box[0], current_box[1]), 
                                         (current_box[2], current_box[3]), color, 2)
-                            cv2.putText(frame, status, (current_box[0], current_box[1]-10), 
+                            cv2.putText(original_frame, status, (current_box[0], current_box[1]-10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, self.font_scale + .05, color, 2)
                         
                 # Drawing the frame                
                 
                 if(self.ui_transparency == 1.0):
-                    cv2.imshow('Face Capture Client (Glasses)', frame)
+                    cv2.imshow('Face Capture Client (Glasses)', original_frame)
                 else:
                     combined_frame = cv2.addWeighted(original_frame,1-self.ui_transparency,frame,self.ui_transparency,0)
                     cv2.imshow('Face Capture Client (Glasses)', combined_frame)
