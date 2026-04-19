@@ -415,8 +415,7 @@ class FaceRecognitionServer:
                 else:
                     response_packet = IDPacket(False, seq_num, result, similarity, fullname=db_info.get("fullname") if result is not None else "Unknown", age=db_info.get("age") if result is not None else 0)
 
-                    response_data = response_packet.serialize()
-                
+                response_data = response_packet.serialize()
                 client_socket.sendall(response_data)
                 
                 self.logger.info(f"Sent response for seq_num {seq_num}: success={response_packet.success}")
