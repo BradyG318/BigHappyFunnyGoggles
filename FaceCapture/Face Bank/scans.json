@@ -1,1 +1,2 @@
-[{"name": "Andrew McCleary", "image_paths": ["test1.jpg", "test2.jpg"], "age": 20}]
+[{"name": "Grant Foody", "image_paths": ["grantfoody1.jpg", "grantfoody2.jpg", "grantfoody3.jpg"], "age": 21},
+{"name": "Morgan Montz", "image_paths": ["morganmontz1.jpg", "morganmontz2.jpg", "morganmontz3.jpg"], "age": 21}]

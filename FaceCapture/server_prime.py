@@ -229,9 +229,9 @@ class FaceRecognitionServer:
             #face_crop = cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR)
             
             #DEBUG show image
-            cv2.imshow("Face Crop", face_crop)
+            # cv2.imshow("Face Crop", face_crop)
             
-            cv2.waitKey(1)
+            # cv2.waitKey(1)
             
             embeddings = DeepFace.represent(
                 img_path=face_crop, 
@@ -321,8 +321,11 @@ class FaceRecognitionServer:
             self.logger.debug(f"Recognizing {num_crops} face(s)")
             
             if num_crops == 1:
+                # Resize crop to 160 * 160 for Facenet512
+                face_crop = cv2.resize(face_crops[0], (160, 160))
+                
                 # Apply lighting normalization to single crop
-                processed_face_crop = self.conservative_lighting_normalization(face_crops[0])
+                processed_face_crop = self.conservative_lighting_normalization(face_crop)
                 
                 # Get encoding for single face
                 embedding = self.get_deepface_embedding(processed_face_crop)
@@ -333,6 +336,9 @@ class FaceRecognitionServer:
                 # Get encodings for multiple faces and average them
                 embeddings = []
                 for face_crop in face_crops:
+                    # Resize crop to 160 * 160 for Facenet512
+                    face_crop = cv2.resize(face_crops[0], (160, 160))
+                    
                     # Apply lighting normalization to all crops
                     processed_face_crop = self.conservative_lighting_normalization(face_crop)
                     
