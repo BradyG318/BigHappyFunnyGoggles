@@ -175,6 +175,7 @@ class FaceCaptureClient:
         self.manualExposure = 10.0
 
         self._connect_to_server()
+    
     #Bluetooth Functions
     def _start_bluetooth_server(self):
         """Start an RFCOMM Bluetooth server so the Android app can connect."""
@@ -382,7 +383,6 @@ class FaceCaptureClient:
                             track.pending_seq_num = None
             self.request_queue.task_done()
 
-
     def bt_send(self, data: bytes):
         with self.bt_lock:
             if self.bt_sock is None:
@@ -434,6 +434,7 @@ class FaceCaptureClient:
             print(person_data)
         except Exception as e:
             print(f"[BT ERROR] Failed to parse incoming Bluetooth data: {e}")
+    
     def _connect_to_server(self):
         """Establish or re-establish connection to server"""
         try:
@@ -449,10 +450,10 @@ class FaceCaptureClient:
             print(f"[INFO] Connected to server at {self.host}:{self.port}")
             
             # Wrap the socket with SSL
-            context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            context.load_verify_locations('server.crt')  # Load server's certificate for verification
-            context.check_hostname = False  # Disable hostname checking
-            self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
+            #context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            #context.load_verify_locations('server.crt')  # Load server's certificate for verification
+            #context.check_hostname = False  # Disable hostname checking
+            #self.sock = context.wrap_socket(self.sock, server_hostname=self.host)
             print(f"[INFO] SSL handshake completed with server at {self.host}:{self.port}")
             
         except Exception as e:

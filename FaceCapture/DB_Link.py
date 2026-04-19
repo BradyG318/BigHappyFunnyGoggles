@@ -100,7 +100,7 @@ class DB_Link:
     
     async def get_all_vectors_async(self) -> Dict[int, List[float]]:
         """Get all face vectors from database"""
-        rows = await self.conn.fetch('SELECT id, encoding FROM encodings') # change back to 'faces', if needed
+        rows = await self.conn.fetch('SELECT id, encoding FROM demo') # change back to 'faces', if needed
         vectors_dict = {}
         for row in rows:
             # pgvector returns the vector as a string that needs parsing
@@ -187,7 +187,7 @@ class DB_Link:
     async def get_info_by_id_async(self, id: int) -> Dict[str, Any]:
         """Get all information for a face entry by ID"""
         try:
-            row = await self.conn.fetchrow('SELECT * FROM info WHERE id = $1', id)
+            row = await self.conn.fetchrow('SELECT * FROM demo_info WHERE id = $1', id)
             if row:
                 return dict(row)
             else:
