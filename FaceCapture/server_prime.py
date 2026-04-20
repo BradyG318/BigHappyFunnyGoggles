@@ -83,6 +83,9 @@ class FaceRecognitionServer:
                     client_socket, client_addr = self.server_socket.accept()
                     self.logger.info(f"Accepted connection from {client_addr}")
                     
+                    # Set timeout for client socket to prevent hanging connections
+                    client_socket.settimeout(30.0)  # Set socket timeout
+                    
                     ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
                     self.logger.info(f"SSL handshake completed with {client_addr}")
                     
@@ -112,9 +115,7 @@ class FaceRecognitionServer:
     
     def _accept_connection(self, client_socket, client_addr): 
         """Accept incoming TCP connection from glasses"""
-        try:
-            client_socket.settimeout(60.0)  # Set socket timeout
-                        
+        try:                        
             # Process packets in loop
             while self.running:
                 try:

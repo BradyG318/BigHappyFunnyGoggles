@@ -346,7 +346,10 @@ class FaceCaptureClient:
                 break #Exit the thread if there is no task
             track_id, packet = task
 
-            if self.tracker.get_active_tracks().get(track_id).locked_id: # If ID is locked, skip sending to server (already have a confident match)
+            # If ID is locked, skip sending to server (already have a confident match)
+            track = self.tracker.get_active_tracks().get(track_id)
+
+            if track is None or track.locked_id:
                 self.request_queue.task_done()
                 continue
             
@@ -706,6 +709,10 @@ class FaceCaptureClient:
                             if track.server_id is None or track.server_id == 0:
                                 status = "Poor Quality"
                                 color = (0, 0, 255)  # Red
+                            can_send = False
+                        
+                        # prevent queuing multiple packets for the same track before receiving a response (also handles case where face is detected but then lost before response is received, preventing multiple pending packets for the same track)
+                        if track.pending_seq_num is not None:
                             can_send = False
                         
                         if can_send and not track.locked_id:
