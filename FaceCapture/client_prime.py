@@ -184,6 +184,7 @@ class FaceCaptureClient:
             print("Bluetooth Disabled Nerd")
         
         self.max_num_people = 2
+        self.max_changed = False
         self.display_on = True
         self.ui_transparency = 1.0
         self.font_scale = .55
@@ -283,6 +284,8 @@ class FaceCaptureClient:
                     try:
                         settings = json.loads(decoded)
                         #global max_num_people
+                        if(self.max_num_people != settings["numPeople"]):
+                            self.max_changed = True
                         self.max_num_people = settings["numPeople"]
                         #global display_on
                         self.display_on = settings["showDisplay"]
@@ -789,7 +792,15 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-                
+
+                #Restart the model is the # of people scanned in settings has changed
+                if ENABLEBT and self.max_changed:
+                    break
+
+        if ENABLEBT and self.max_changed:
+            self.max_changed = False
+            self.run()
+        
         #Cleanup but Bluetooth
         self._stop_bluetooth()
 
