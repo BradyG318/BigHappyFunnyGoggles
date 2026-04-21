@@ -115,6 +115,14 @@ def process_images(name, age, images):
             print(f"Error: Could not load image from {image_source}")
             return False
 
+        # Apply CLAHE prior to looking for the face                                    
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        img[:,:,0] = clahe.apply(img[:,:,0])
+        
+        # Converting image from LAB Color model to BGR color space
+        img = cv2.cvtColor(img, cv2.COLOR_Lab2BGR)
+
         rgb_frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = face_mesh.process(rgb_frame)
 
