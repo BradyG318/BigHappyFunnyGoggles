@@ -1,1 +1,2 @@
-[{"name": "Andrew McCleary", "image_paths": ["test1.jpg", "test2.jpg"], "age": 20}]
+[{"name": "Andrew McCleary", "image_paths": ["test1.jpg", "test2.jpg"], "age": 20}],
+[{"name": "Christopher Ponce De Leon Moreno", "image_paths": ["ChristopherPonceDeLeonMoreno/ChristopherPonceDeLeonMoreno1.jpg", "ChristopherPonceDeLeonMoreno/ChristopherPonceDeLeonMoreno2.jpg", "ChristopherPonceDeLeonMoreno/ChristopherPonceDeLeonMoreno3.jpg"], "age": 20}],
