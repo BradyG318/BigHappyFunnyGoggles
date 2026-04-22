@@ -296,8 +296,6 @@ class FaceRecognitionServer:
                 
                 if similarity > best_similarity:
                     best_similarity = similarity
-                        
-                if similarity >= self.RECOGNITION_THRESHOLD:
                     best_match_id = face_id
         
         # Return best match and best_similarity for response packet
@@ -375,7 +373,7 @@ class FaceRecognitionServer:
             else:
                 threshold = self.RECOGNITION_THRESHOLD
             
-            match = DB_Link.db_link.search_faiss(embedding_list, threshold=self.RECOGNITION_THRESHOLD)
+            match = DB_Link.db_link.search_faiss(embedding_list, threshold)
             if match:
                 match_id, similarity = match
                 if similarity >= threshold:
