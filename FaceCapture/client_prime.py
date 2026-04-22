@@ -786,7 +786,7 @@ class FaceCaptureClient:
                         if(self.autoExposeOn):
                             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
                         else:
-                            self.cap.set(cv2.CAP_PROP_EXPOSURE, self.manualExposure)
+                            self.cap.set(cv2.CAP_PROP_EXPOSURE, self.manualExposure*-1) #Negative is weird, but necessary, the way this handles exposure is rlly odd, where the val put in is 2^(inputVal), idfk why
 
                         # Draw the box and status
                         if track.server_id is None or track.server_id == 0 and self.display_on:
