@@ -37,14 +37,14 @@ except ImportError:
 SERVER_HOST = '76.28.113.73' #'127.0.0.1'   
 #SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
 SERVER_PORT =  33060 #5000
-ENABLEBT = False #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
+ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
 frameWidth = 1280
 frameHeight = 720
 
 # Camera
-CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
+CAMERA_INDEX = 1#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
@@ -62,7 +62,12 @@ BT_SERVICE_NAME = "IKnowYouGlasses"
 BT_BACKLOG = 1
 
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
-ID_INFO = {} # kept in client for UI and app
+ID_INFO = {} # maybe move this to track object eventually
+
+max_num_people = 4
+display_on = True
+ui_transparency = 1.0
+font_scale = .55
 
 # Utility functions
 def preprocess_frame(image):
@@ -145,6 +150,7 @@ class FaceCaptureClient:
         self.host = host
         self.port = port
         self.sock = None
+        self.max_changed = False
         
         self.cap = cv2.VideoCapture(CAMERA_INDEX)
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
@@ -807,15 +813,14 @@ class FaceCaptureClient:
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q') or key == 27: 
                     break
-
-                #Restart the model is the # of people scanned in settings has changed
+                
                 if ENABLEBT and self.max_changed:
                     break
-
+        
         if ENABLEBT and self.max_changed:
             self.max_changed = False
-            self.run()
-        
+            client.run()
+
         #Cleanup but Bluetooth
         self._stop_bluetooth()
 
