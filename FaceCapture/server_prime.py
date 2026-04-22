@@ -234,7 +234,7 @@ class FaceRecognitionServer:
                 img_path=face_crop, 
                 model_name=self.DEEPFACE_MODEL, 
                 enforce_detection=False,
-                align=False
+                align=True
             )
             
             if embeddings:
