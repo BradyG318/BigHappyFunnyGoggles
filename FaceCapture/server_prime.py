@@ -28,9 +28,6 @@ class FaceRecognitionServer:
     # Recognition Threshold 
     RECOGNITION_THRESHOLD = 0.65
     
-    # To avoid duplicate tracking in one session TODO: implement
-    currently_tracked_faces = set()
-    
     # ~~~ SERVER FUNCTIONS ~~~
     def __init__(self, host='10.111.104.220', port=5000):
         """
@@ -168,7 +165,7 @@ class FaceRecognitionServer:
                 data += chunk
                 
             except socket.timeout:
-                return None
+                raise
             
             except Exception as e:
                 self.logger.error(f"Receive error: {e}")
@@ -339,7 +336,7 @@ class FaceRecognitionServer:
                 embeddings = []
                 for face_crop in face_crops:
                     # Resize crop to 160 * 160 for Facenet512
-                    face_crop = cv2.resize(face_crops[0], (160, 160))
+                    face_crop = cv2.resize(face_crop, (160, 160))
                     
                     # Apply lighting normalization to all crops
                     processed_face_crop = self.conservative_lighting_normalization(face_crop)

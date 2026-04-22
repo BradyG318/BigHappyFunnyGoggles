@@ -53,8 +53,8 @@ BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
 mp_face_mesh = mp.solutions.face_mesh
 
 # Pose/Quality Thresholds
-POSE_QUALITY_THRESHOLD = 0.0
-SHARPNESS_THRESHOLD = 0.0
+POSE_QUALITY_THRESHOLD = 0.8
+SHARPNESS_THRESHOLD = 30.0
 
 # Bluetooth Consts
 BT_UUID = "00001101-0000-1000-8000-00805F9B34FB"
@@ -62,14 +62,14 @@ BT_SERVICE_NAME = "IKnowYouGlasses"
 BT_BACKLOG = 1
 
 # UI info dictionary - # Example: 1: {"fullname": "Alice Smith", "age": 30}
-ID_INFO = {} # maybe move this to track object eventually
+ID_INFO = {} # kept in client for UI and app
 
 # Utility functions
 def preprocess_frame(image):
     # Reduce compression artifacts
     #image = cv2.medianBlur(image, 5)  # Reduce noise aggressively for longer range
     
-    # Enhance contrast aggressively for longer range (helps with detection)
+    # Lighter (somehow better than CLAHE) constrast enhancement
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     hsv[:,:,2] = cv2.equalizeHist(hsv[:,:,2])   # equalise Value channel
     image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
@@ -358,13 +358,22 @@ class FaceCaptureClient:
             
             response = self._send_packet_and_receive_id(packet)
             current_time = time.time()
-
+            
             #Update tracker with server's repsonse
             if track_id in self.tracker.get_active_tracks():
                 track = self.tracker.get_active_tracks()[track_id]
                 track.last_recognition_time = current_time
                 if response:
+                    # Initialize
+                    duplicate_track_id = None
+                    
                     if response.success:
+                        for other_id, other_track in self.tracker.get_active_tracks().items():
+                            if other_id != track_id and other_track.locked_id and other_track.server_id == response.face_id:
+                                duplicate_track_id = other_id
+                                duplicate_track = other_track
+                                break
+                        
                         track.server_id = response.face_id
                         track.confidence = response.similarity
                         track.locked_id = True
@@ -410,6 +419,12 @@ class FaceCaptureClient:
                             #print("LOCKING ID DUE TO CONSISTENT RESULTS")
                             track.locked_id = True
                         
+                        for other_id, other_track in self.tracker.get_active_tracks().items():
+                            if other_id != track_id and other_track.locked_id and other_track.server_id == response.face_id:
+                                duplicate_track_id = other_id
+                                duplicate_track = other_track
+                                break
+                        
                         track.server_id = response.face_id
                         track.confidence = response.similarity
                         track.pending_seq_num = None
@@ -420,6 +435,12 @@ class FaceCaptureClient:
 
                         else:
                             track.recognition_cooldown = current_time + 1.0
+                    
+                    # Don't lock ID if it's the same as another active track
+                    if duplicate_track_id is not None:
+                        track.locked_id = False
+                        track.recognition_cooldown = current_time + 1.0
+                    # If the current twinning track was seen more recently/at same time as the primary, trust it more and don't lock the ID for this track yet (wait for more consistent results)
                             
             self.request_queue.task_done()
 
@@ -617,12 +638,6 @@ class FaceCaptureClient:
                             
                         is_sharp_enough = sharpness >= SHARPNESS_THRESHOLD                          
                         is_pose_ok = pose_score >= POSE_QUALITY_THRESHOLD
-                        
-                        if not is_sharp_enough:
-                            print("no sharp")
-                            
-                        if not is_pose_ok:
-                            print("no pose")
                         
                         # Always append the most recent box for tracking
                         current_frame_boxes.append(track_box)
