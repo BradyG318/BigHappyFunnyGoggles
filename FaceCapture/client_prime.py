@@ -15,6 +15,8 @@ import queue
 import ssl
 import json
 import BluetoothSettingsPacket as bst
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -196,6 +198,9 @@ class FaceCaptureClient:
         self.font_scale = .55
         self.autoExposeOn = True
         self.manualExposure = 10.0
+
+        self.shared_key = b'ersvplvpkbtprvlpsrfvkspfvlsprfvl'
+        self.aesgcm = AESGCM(self.shared_key)
 
         self._connect_to_server()
     
@@ -457,8 +462,11 @@ class FaceCaptureClient:
                 return False
 
             try:
-                self.bt_sock.sendall(data)
-                print(f"[BT TX] Sent {len(data)} bytes over Bluetooth.")
+                nonce = os.urandom(12)
+                encrypted = self.aesgcm.encrypt(nonce, data, None)
+                payload = len(nonce).to_bytes(1, 'big') + nonce + encrypted
+                self.bt_sock.sendall(payload)
+                print(f"[BT TX] Sent {len(payload)} bytes over Bluetooth.")
                 return True
             except Exception as e:
                 print(f"[BT ERROR] Send failed: {e}")
