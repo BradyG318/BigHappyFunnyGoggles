@@ -1,12 +1,10 @@
-# BigHappyFunnyGoggles
-tbh, we may need a slightly more marketable name - changed it!
+# I Know You AR Facial Recogniton Glasses
 
+To run our client program:
+    #1. cd FaceCapture
+    #2. py -3.11 -m venv client_env
+    #3. client_env\Scripts\activate
+    #4. pip install -r client_requirements.txt (ensure all versions identical as pip sometimes messes this up)
+    #5. python client_prime.py --host [server-ip] --port [server-port]
 
-after cloning the repo and cding into /FaceCapture
-create virtual environment for python (first install python 3.11!)
-
-py -3.11 -m venv mp_env
-
-mp_env\Scripts\activate
-
-pip install -r requirements.txt
+GitHub repo access: https://github.com/BradyG318/BigHappyFunnyGoggles/tree/face-capture-testing
