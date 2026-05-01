@@ -83,6 +83,9 @@ class FaceRecognitionServer:
                     # Set timeout for client socket to prevent hanging connections
                     client_socket.settimeout(30.0)  # Set socket timeout
                     
+                    # Windows method to set TCP keepalive options to prevent hanging connections
+                    client_socket.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 60_000, 10_000))
+                    
                     ssl_client_socket = self.ssl_context.wrap_socket(client_socket, server_side=True)
                     self.logger.info(f"SSL handshake completed with {client_addr}")
                     
@@ -116,6 +119,9 @@ class FaceRecognitionServer:
             # Process packets in loop
             while self.running:
                 try:
+                    # Deadline for receiving a packet to prevent hanging
+                    deadline = time.time() + 90.0  # 90 seconds to receive a packet
+                    
                     # Read packet length prefix (4 bytes)
                     length_data = self._recv_exactly(client_socket, 4)
                     
@@ -141,6 +147,12 @@ class FaceRecognitionServer:
                 
                 except socket.timeout:
                     self.logger.debug(f"Connection from {client_addr} timed out")
+                    
+                    # Prevent hanging
+                    if time.time() > deadline:
+                        self.logger.warning(f"Connection {client_addr} idle for too long, closing")
+                        break
+                    
                     continue # Continue to wait for new packets
                 
                 except ConnectionResetError:
