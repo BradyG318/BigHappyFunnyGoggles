@@ -34,8 +34,9 @@ except ImportError:
 #Client Config
 
 # Network
-SERVER_HOST = '127.0.0.1'
-SERVER_PORT =  5000
+SERVER_HOST = '24.34.94.198' #'127.0.0.1'   
+#SERVER_HOST = '10.0.0.172' #'127.0.0.1'   #Brady's gross yucky local IP (cuz I'm tired of switching it back every time and uncommenting is marginally easier)      
+SERVER_PORT =  33060 #5000
 ENABLEBT = True #CHANGE THIS TO FALSE IF U WANT TO TEST ON WINDOWS
 TIMEOUT = 60.0
 camFramerate = 15
@@ -43,7 +44,7 @@ frameWidth = 1280
 frameHeight = 720
 
 # Camera
-CAMERA_INDEX = 1#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
+CAMERA_INDEX = 0#7  #0 for webcam, 6 for virtual cam (OBS), 7 for glasses (usually)
 
 # Face Collection Config (Used for Capture Mode)
 BEST_SAMPLES_TO_AVERAGE = 10 # Send 10 crops for full enrollment packet.
