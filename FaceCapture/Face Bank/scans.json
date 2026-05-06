@@ -1,1 +1,5 @@
-[{"name": "Soumyashree Sahoo", "image_paths": ["SoumyashreeSahoo/SoumyashreeSahoo1C.jpg", "SoumyashreeSahoo/SoumyashreeSahoo2C.jpeg"], "age": 40}]
+[{"name": "Ruby Elkharboutly", "image_paths": ["RubyElkharboutly/RubyElkharboutly1.jpg", "RubyElkharboutly/RubyElkharboutly2.png", "RubyElkharboutly/RubyElkharboutly3.jpeg"], "age": 48},
+{"name": "Marshall Darling", "image_paths": ["MarshallDarling/MarshallDarling1.jpg", "MarshallDarling/MarshallDarling2.jpg"], "age": 28},
+{"name": "John Greenleaf", "image_paths": ["JohnGreenleaf/JohnGreenleaf1.jpg", "JohnGreenleaf/JohnGreenleaf2.jpg"], "age": 55},
+{"name": "Taskin Kocak", "image_paths": ["TaskinKocak/TaskinKocak1.jpg", "TaskinKocak/TaskinKocak2.png", "TaskinKocak/TaskinKocak3.jpeg"], "age": 52},
+{"name": "Cameron Lamack", "image_paths": ["CameronLamack/CameronLamack1.jpg", "CameronLamack/CameronLamack2.jpg"], "age": 35}]
